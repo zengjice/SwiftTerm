@@ -204,6 +204,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     private var findBarOptions: SearchOptions = SearchOptions()
     var debug: TerminalDebugView?
     var pendingDisplay: Bool = false
+    var coreGraphicsLineRenderCache = CoreGraphicsLineRenderCache<CoreGraphicsLineRenderState>()
     /// Output received shortly after local input is likely echo or prompt redraw;
     /// render it without the 16.67ms frame-rate throttle so typing feels responsive.
     var lastUserInputUptimeNs: UInt64 = 0
@@ -696,11 +697,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     /// Controls weather to use high ansi colors, if false terminal will use bold text instead of high ansi colors
-    public var useBrightColors: Bool = true
+    public var useBrightColors: Bool = true {
+        didSet {
+            coreGraphicsLineRenderCache.removeAll()
+            terminal.updateFullScreen()
+            queuePendingDisplay()
+        }
+    }
 
     /// When true, block element (U+2580-U+259F) and box drawing (U+2500-U+257F) characters use custom rendering.
     public var customBlockGlyphs: Bool = true {
         didSet {
+            coreGraphicsLineRenderCache.removeAll()
             terminal.updateFullScreen()
             queuePendingDisplay()
         }
@@ -892,6 +900,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// Controls link highlighting and link activation behavior.
     public var linkHighlightMode: LinkHighlightMode = .hoverWithModifier {
         didSet {
+            coreGraphicsLineRenderCache.removeAll()
             linkHighlightRange = nil
             updateLinkHighlightTracking()
             terminal.updateFullScreen()

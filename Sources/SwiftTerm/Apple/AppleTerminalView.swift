@@ -138,6 +138,9 @@ extension TerminalView {
         self.urlAttributes = [:]
         self.colors = Array(repeating: nil, count: 256)
         self.trueColors = [:]
+        #if os(macOS)
+        self.coreGraphicsLineRenderCache.removeAll()
+        #endif
     }
     
     // This is invoked when the font changes to recompute state
@@ -391,6 +394,9 @@ extension TerminalView {
     {
         urlAttributes = [:]
         attributes = [:]
+        #if os(macOS)
+        coreGraphicsLineRenderCache.removeAll()
+        #endif
         
         terminal.updateFullScreen ()
         queuePendingDisplay()
@@ -1291,6 +1297,13 @@ extension TerminalView {
         var placeholderImageCache: [UInt32: TTImage] = [:]
 
         #if os(macOS)
+        let visibleStart = displayBuffer.yDisp
+        let visibleEnd = min(displayBuffer.lines.count - 1,
+                             visibleStart + max(0, displayBuffer.rows - 1))
+        coreGraphicsLineRenderCache.retainRows(
+            in: visibleStart <= visibleEnd ? visibleStart...visibleEnd : nil
+        )
+
         // Clear the invalidated region before painting. We fill only cells that carry
         // an explicit background; default-background cells rely on transparent backing-
         // store pixels showing the layer's background color. AppKit clears the backing
@@ -1361,7 +1374,48 @@ extension TerminalView {
             } 
             #endif
             let line = displayBuffer.lines [row]
+            #if os(macOS)
+            let canUseRenderCache = canCacheCoreGraphicsLineRenderState(
+                selectionActive: selection.active,
+                linkHighlightMode: linkHighlightMode,
+                commandActive: commandActive,
+                hasLinkHighlight: linkHighlightRange != nil
+            )
+            let renderState: CoreGraphicsLineRenderState
+            if canUseRenderCache,
+               let cached = coreGraphicsLineRenderCache.value(forRow: row,
+                                                               line: line,
+                                                               cols: displayBuffer.cols) {
+                renderState = cached
+            } else {
+                let lineInfo = buildAttributedString(row: row, line: line, cols: displayBuffer.cols)
+                let preparedSegments = lineInfo.segments.compactMap { segment -> PreparedViewLineSegment? in
+                    guard segment.attributedString.length > 0 else { return nil }
+                    let ctLine = CTLineCreateWithAttributedString(segment.attributedString)
+                    guard let runs = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return nil }
+                    return PreparedViewLineSegment(segment: segment, ctLine: ctLine, runs: runs)
+                }
+                renderState = CoreGraphicsLineRenderState(lineInfo: lineInfo,
+                                                          preparedSegments: preparedSegments)
+                if canUseRenderCache {
+                    coreGraphicsLineRenderCache.insert(renderState,
+                                                       forRow: row,
+                                                       line: line,
+                                                       cols: displayBuffer.cols)
+                }
+            }
+            let lineInfo = renderState.lineInfo
+            let preparedSegments = renderState.preparedSegments
+            #else
             let lineInfo = buildAttributedString(row: row, line: line, cols: displayBuffer.cols)
+            let preparedSegments: [(segment: ViewLineSegment, ctLine: CTLine, runs: [CTRun])] =
+                lineInfo.segments.compactMap { segment in
+                    guard segment.attributedString.length > 0 else { return nil }
+                    let ctLine = CTLineCreateWithAttributedString(segment.attributedString)
+                    guard let runs = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return nil }
+                    return (segment, ctLine, runs)
+                }
+            #endif
             let rowBase = lineOrigin.y + cellDimension.height
             var underTextImages: [AppleImage] = []
             var overTextKittyImages: [AppleImage] = []
@@ -1392,15 +1446,6 @@ extension TerminalView {
                 underTextImages.sort(by: sortKitty)
                 overTextKittyImages.sort(by: sortKitty)
             }
-
-            // Pre-create CTLines and runs once per row to avoid duplicate creation
-            let preparedSegments: [(segment: ViewLineSegment, ctLine: CTLine, runs: [CTRun])] =
-                lineInfo.segments.compactMap { segment in
-                    guard segment.attributedString.length > 0 else { return nil }
-                    let ctLine = CTLineCreateWithAttributedString(segment.attributedString)
-                    guard let runs = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return nil }
-                    return (segment, ctLine, runs)
-                }
 
             // Background fill loop — uses cached CTLines
             context.saveGState()
