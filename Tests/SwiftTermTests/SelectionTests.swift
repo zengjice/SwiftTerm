@@ -51,6 +51,39 @@ final class SelectionTests: TerminalDelegate {
         #expect(selection.getSelectedText() == "hello")
     }
 
+    @Test func testSelectWordFromEitherHalfOfWideCharacter() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 1))
+        let selection = SelectionService(terminal: terminal)
+        terminal.feed(text: "中文 test")
+
+        selection.selectWordOrExpression(at: Position(col: 0, row: 0), in: terminal.buffer)
+        #expect(selection.getSelectedText() == "中文")
+
+        // Column 1 is the continuation cell for 中.
+        selection.selectWordOrExpression(at: Position(col: 1, row: 0), in: terminal.buffer)
+        #expect(selection.getSelectedText() == "中文")
+    }
+
+    @Test func testSelectWideCharacterAndAdjacentAsciiAsOneWord() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 1))
+        let selection = SelectionService(terminal: terminal)
+        terminal.feed(text: "中abc test")
+
+        selection.selectWordOrExpression(at: Position(col: 1, row: 0), in: terminal.buffer)
+
+        #expect(selection.getSelectedText() == "中abc")
+    }
+
+    @Test func testSelectWideSymbolFromContinuationCell() {
+        let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 1))
+        let selection = SelectionService(terminal: terminal)
+        terminal.feed(text: "🧠 test")
+
+        selection.selectWordOrExpression(at: Position(col: 1, row: 0), in: terminal.buffer)
+
+        #expect(selection.getSelectedText() == "🧠")
+    }
+
     @Test func testSelectWordOrExpressionSelectsBalancedParens() {
         let terminal = Terminal(delegate: self, options: TerminalOptions(cols: 20, rows: 1))
         let selection = SelectionService(terminal: terminal)
