@@ -60,6 +60,25 @@ extension String {
     return textInputValidUTF16Offset(rawOffset, rounding: distance < 0 ? .backward : .forward)
   }
 
+  /// Advances a UIKit text position without inventing an in-document result for
+  /// an out-of-document request. `UITextInput.position(from:offset:)` requires
+  /// `nil` in that case; clamping confuses input methods that probe context with
+  /// deliberately large offsets.
+  func textInputOffsetIfValid(_ offset: Int, advancedByUTF16Distance distance: Int) -> Int? {
+    guard offset >= 0, offset <= utf16.count,
+          textInputValidUTF16Offset(offset, rounding: .forward) == offset else {
+      return nil
+    }
+
+    let (rawOffset, overflow) = offset.addingReportingOverflow(distance)
+    guard !overflow, rawOffset >= 0, rawOffset <= utf16.count else {
+      return nil
+    }
+
+    let rounding: TextInputUTF16Rounding = distance < 0 ? .backward : .forward
+    return textInputValidUTF16Offset(rawOffset, rounding: rounding)
+  }
+
   func textInputRange(startUTF16Offset: Int, endUTF16Offset: Int) -> Range<String.Index> {
     let startOffset = max(0, min(startUTF16Offset, utf16.count))
     let endOffset = max(startOffset, min(endUTF16Offset, utf16.count))

@@ -92,6 +92,16 @@ extension TerminalView: UITextInput {
         return normalized == tp.offset ? tp : TextPosition(offset: normalized)
     }
 
+    private func validTextPosition(_ position: UITextPosition) -> TextPosition? {
+        guard let tp = position as? TextPosition,
+              tp.offset >= 0,
+              tp.offset <= textInputStorage.textInputUTF16Count,
+              normalizedOffset(tp.offset, rounding: .forward) == tp.offset else {
+            return nil
+        }
+        return tp
+    }
+
     private func coerceTextRange(_ range: UITextRange) -> TextRange? {
         if let r = range as? TextRange {
             let start: Int
@@ -331,15 +341,32 @@ extension TerminalView: UITextInput {
     }
     
     public func position(from position: UITextPosition, offset: Int) -> UITextPosition? {
-        guard let from = position as? TextPosition else { return nil }
-        let newOffset = textInputStorage.textInputOffset(from.offset, advancedByUTF16Distance: offset)
+        guard let from = validTextPosition(position),
+              let newOffset = textInputStorage.textInputOffsetIfValid(
+                from.offset,
+                advancedByUTF16Distance: offset
+              ) else {
+            uitiLog("position(from:\((position as? TextPosition)?.offset.description ?? "unsupported"), offset:\(offset)) -> nil")
+            return nil
+        }
         let result = TextPosition(offset: newOffset)
         uitiLog("position(from:\(from.offset), offset:\(offset)) -> \(result.offset)")
         return result
     }
     
     public func position(from position: UITextPosition, in direction: UITextLayoutDirection, offset: Int) -> UITextPosition? {
-        return self.position(from: position, offset: offset)
+        let distance: Int
+        switch direction {
+        case .left, .up:
+            let (negated, overflow) = offset.multipliedReportingOverflow(by: -1)
+            guard !overflow else { return nil }
+            distance = negated
+        case .right, .down:
+            distance = offset
+        @unknown default:
+            return nil
+        }
+        return self.position(from: position, offset: distance)
     }
     
     public func compare(_ position: UITextPosition, to other: UITextPosition) -> ComparisonResult {
@@ -361,16 +388,35 @@ extension TerminalView: UITextInput {
     }
             
     public func firstRect(for range: UITextRange) -> CGRect {
-        return bounds
+        guard coerceTextRange(range) != nil else { return .zero }
+        return textInputCaretRect
     }
     
     public func caretRect(for position: UITextPosition) -> CGRect {
-        return bounds
+        guard validTextPosition(position) != nil else { return .zero }
+        return textInputCaretRect
     }
     
     public func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
-        guard let r = range as? TextRange else { return [] }
-        return [TextSelectionRect(rect: bounds, range: r, string: textInputStorage)]
+        guard let r = coerceTextRange(range) else { return [] }
+        return [TextSelectionRect(rect: textInputCaretRect, range: r, string: textInputStorage)]
+    }
+
+    /// The editable buffer is intentionally invisible; terminal text is drawn by
+    /// SwiftTerm. Anchor input-method UI to the real terminal caret instead of
+    /// claiming that the entire terminal bounds are a single caret rectangle.
+    private var textInputCaretRect: CGRect {
+        let frame = caretFrame
+        guard frame.width > 0, frame.height > 0 else {
+            let height = max(1, cellDimension.height)
+            return CGRect(
+                x: bounds.minX,
+                y: max(bounds.minY, bounds.maxY - height),
+                width: max(1, cellDimension.width),
+                height: height
+            )
+        }
+        return frame
     }
     
     // These can be exercised by the hold-spacebar
@@ -390,22 +436,37 @@ extension TerminalView: UITextInput {
     }
 
     public func position(within range: UITextRange, farthestIn direction: UITextLayoutDirection) -> UITextPosition? {
-        return range.end
+        guard let r = coerceTextRange(range) else { return nil }
+        switch direction {
+        case .left, .up:
+            return r.startPosition
+        case .right, .down:
+            return r.endPosition
+        @unknown default:
+            return nil
+        }
     }
 
     public func characterRange(byExtending position: UITextPosition, in direction: UITextLayoutDirection) -> UITextRange? {
-        guard let p = position as? TextPosition else { return nil }
-        return TextRange(from: p, to: TextPosition(offset: textInputStorage.textInputUTF16Count))
+        guard let p = validTextPosition(position) else { return nil }
+        switch direction {
+        case .left, .up:
+            return TextRange(from: TextPosition(offset: 0), to: p)
+        case .right, .down:
+            return TextRange(from: p, to: TextPosition(offset: textInputStorage.textInputUTF16Count))
+        @unknown default:
+            return nil
+        }
     }
     
     public func position(within range: UITextRange, atCharacterOffset offset: Int) -> UITextPosition? {
-        guard let r = range as? TextRange else { return nil }
-        let rawOffset = r.startPosition.offset + offset
-        guard rawOffset >= r.startPosition.offset else {
-            return nil
-        }
-        let endOffset = textInputStorage.textInputValidUTF16Offset(rawOffset, rounding: offset < 0 ? .backward : .forward)
-        if endOffset > r.endPosition.offset {
+        guard let r = coerceTextRange(range),
+              let endOffset = textInputStorage.textInputOffsetIfValid(
+                r.startPosition.offset,
+                advancedByUTF16Distance: offset
+              ),
+              endOffset >= r.startPosition.offset,
+              endOffset <= r.endPosition.offset else {
             return nil
         }
         return TextPosition(offset: endOffset)
