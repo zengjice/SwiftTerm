@@ -32,6 +32,56 @@ public extension Notification.Name {
     static let terminalViewMetaModifierReset = Notification.Name("SwiftTerm.TerminalView.metaModifierReset")
 }
 
+private final class SelectionMagnifierView: UIView {
+    private weak var sourceView: UIView?
+    private var sourcePoint = CGPoint.zero
+    private let zoom: CGFloat = 1.8
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        contentMode = .redraw
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.28
+        layer.shadowRadius = 8
+        layer.shadowOffset = CGSize(width: 0, height: 3)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(sourceView: UIView, sourcePoint: CGPoint) {
+        self.sourceView = sourceView
+        self.sourcePoint = sourcePoint
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 14).cgPath
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let sourceView, let context = UIGraphicsGetCurrentContext() else { return }
+
+        let outerPath = UIBezierPath(roundedRect: bounds, cornerRadius: 14)
+        UIColor.systemBackground.setFill()
+        outerPath.fill()
+
+        let contentRect = bounds.insetBy(dx: 4, dy: 4)
+        context.saveGState()
+        UIBezierPath(roundedRect: contentRect, cornerRadius: 11).addClip()
+        context.translateBy(x: contentRect.midX, y: contentRect.midY)
+        context.scaleBy(x: zoom, y: zoom)
+        context.translateBy(x: -sourcePoint.x, y: -sourcePoint.y)
+        sourceView.layer.render(in: context)
+        context.restoreGState()
+
+        UIColor.separator.setStroke()
+        outerPath.lineWidth = 1
+        outerPath.stroke()
+    }
+}
+
 /**
  * TerminalView provides an AppKit/UIKit front-end to the `Terminal` terminal emulator.
  * It is up to a subclass to either wire the terminal emulator to a remote terminal
@@ -519,6 +569,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     public func updateUiClosed() {
         stopSelectionAutoScroll()
+        hideSelectionMagnifier()
         self.link.invalidate()
     }
     
@@ -867,6 +918,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     private let selectionAutoScrollInterval: UInt64 = 60_000_000
     private var selectionAutoScrollTask: Task<(), Never>?
     private var selectionAutoScrollGeneration = 0
+    private var selectionMagnifier: SelectionMagnifierView?
 
     private func isNearSelectionHandle (_ hit: Position) -> Bool {
         guard selection.active else { return false }
@@ -892,7 +944,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return viewport
     }
 
-    private func selectionHit (_ gestureRecognizer: UIGestureRecognizer) -> Position {
+    private func selectionPoint (_ gestureRecognizer: UIGestureRecognizer) -> CGPoint {
         var point = gestureRecognizer.location(in: self)
         let viewport = visibleSelectionViewport()
         if !viewport.isNull, !viewport.isEmpty {
@@ -901,7 +953,11 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             let lastVisibleY = max(viewport.minY, viewport.maxY - 1)
             point.y = min(max(point.y, viewport.minY), lastVisibleY)
         }
-        return calculateTapHit(point: point).grid
+        return point
+    }
+
+    private func selectionHit (_ gestureRecognizer: UIGestureRecognizer) -> Position {
+        calculateTapHit(point: selectionPoint(gestureRecognizer)).grid
     }
 
     /// Returns one to three rows per tick. The speed increases as the finger
@@ -929,6 +985,43 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
         let rows = 1 + Int(floor(intensity * 2))
         return direction * CGFloat(rows) * cellDimension.height
+    }
+
+    private func updateSelectionMagnifier (_ gestureRecognizer: UIPanGestureRecognizer) {
+        guard let overlay = window else { return }
+
+        let size = CGSize(width: 124, height: 62)
+        let touchPoint = convert(gestureRecognizer.location(in: self), to: overlay)
+        let sourcePoint = selectionPoint(gestureRecognizer)
+        let horizontalMargin: CGFloat = 8
+        let verticalMargin: CGFloat = 8
+        let fingerClearance: CGFloat = 28
+        let minimumX = overlay.bounds.minX + horizontalMargin
+        let maximumX = overlay.bounds.maxX - horizontalMargin - size.width
+        let safeTop = overlay.bounds.minY + overlay.safeAreaInsets.top + verticalMargin
+        let safeBottom = overlay.bounds.maxY - overlay.safeAreaInsets.bottom - verticalMargin
+
+        let originX = min(max(touchPoint.x - size.width / 2, minimumX), maximumX)
+        var originY = touchPoint.y - size.height - fingerClearance
+        if originY < safeTop {
+            originY = min(touchPoint.y + fingerClearance, safeBottom - size.height)
+        }
+
+        let magnifier: SelectionMagnifierView
+        if let selectionMagnifier {
+            magnifier = selectionMagnifier
+        } else {
+            magnifier = SelectionMagnifierView(frame: CGRect(origin: .zero, size: size))
+            overlay.addSubview(magnifier)
+            selectionMagnifier = magnifier
+        }
+        magnifier.frame = CGRect(origin: CGPoint(x: originX, y: originY), size: size)
+        magnifier.update(sourceView: self, sourcePoint: sourcePoint)
+    }
+
+    private func hideSelectionMagnifier () {
+        selectionMagnifier?.removeFromSuperview()
+        selectionMagnifier = nil
     }
 
     /// Moves an enclosing scroll view by as much of `delta` as it can consume
@@ -1002,6 +1095,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         if moved {
             selection.pivotExtend(bufferPosition: selectionHit(gestureRecognizer))
             requestDisplay()
+            updateSelectionMagnifier(gestureRecognizer)
         }
         return moved
     }
@@ -1046,6 +1140,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     : selection.start
                 selection.pivotExtend(bufferPosition: hit)
                 requestDisplay()
+                updateSelectionMagnifier(gestureRecognizer)
             }
         case .changed:
             if selection.active {
@@ -1057,15 +1152,18 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     startSelectionAutoScroll(gestureRecognizer)
                 }
                 requestDisplay()
+                updateSelectionMagnifier(gestureRecognizer)
             }
         case .ended:
             stopSelectionAutoScroll()
+            hideSelectionMagnifier()
             if selection.active {
                 showContextMenu(forRegion: makeContextMenuRegionForSelection(), pos: selectionHit(gestureRecognizer))
             }
             break
         case .cancelled, .failed:
             stopSelectionAutoScroll()
+            hideSelectionMagnifier()
             selection.active = false
         default:
             break
@@ -1131,6 +1229,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     func disableSelectionPanGesture() {
         stopSelectionAutoScroll()
+        hideSelectionMagnifier()
         panSelectionGesture?.isEnabled = false
     }
     
