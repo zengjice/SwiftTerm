@@ -1102,23 +1102,36 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 
+    /// Gives a handle drag exclusive ownership of its touch. Scroll gestures
+    /// wait only until the selection pan decides whether the touch began on a
+    /// handle: a handle drag selects, while every other drag scrolls normally.
+    private func prioritizeSelectionPan (_ selectionPan: UIPanGestureRecognizer) {
+        panGestureRecognizer.require(toFail: selectionPan)
+
+        var ancestor = superview
+        while let view = ancestor {
+            if let scrollView = view as? UIScrollView {
+                scrollView.panGestureRecognizer.require(toFail: selectionPan)
+            }
+            ancestor = view.superview
+        }
+    }
+
     func enableSelectionPanGesture () {
-        guard panSelectionGesture == nil else {
+        if let gesture = panSelectionGesture {
+            gesture.isEnabled = true
             return
         }
         let gesture = UIPanGestureRecognizer (target: self, action: #selector(panSelectionHandler))
         gesture.maximumNumberOfTouches = 1
         addGestureRecognizer(gesture)
         self.panSelectionGesture = gesture
+        prioritizeSelectionPan(gesture)
     }
     
     func disableSelectionPanGesture() {
         stopSelectionAutoScroll()
-        guard let gesture = panSelectionGesture else {
-            return
-        }
-        removeGestureRecognizer(gesture)
-        panSelectionGesture = nil
+        panSelectionGesture?.isEnabled = false
     }
     
     func setupGestures ()
