@@ -446,9 +446,29 @@ class SelectionService: CustomDebugStringConvertible {
         setActiveAndNotify()
     }
 
+    private func normalizedCharacterPosition (_ uncheckedPosition: Position, in buffer: Buffer) -> Position
+    {
+        guard buffer.lines.count > 0 else {
+            return Position(col: 0, row: 0)
+        }
+        let row = min(max(uncheckedPosition.row, 0), max(0, buffer.lines.count - 1))
+        let line = buffer.lines[row]
+        let col = min(max(uncheckedPosition.col, 0), max(0, min(terminal.cols, line.count) - 1))
+        let position = Position(col: col, row: row)
+        let cell = buffer.getChar(atBufferRelative: position)
+
+        if cell.code == 0 && col > 0 {
+            let previous = buffer.getChar(atBufferRelative: Position(col: col - 1, row: row))
+            if previous.width == 2 {
+                return Position(col: col - 1, row: row)
+            }
+        }
+        return position
+    }
+
     private func character (at position: Position, in buffer: Buffer) -> Character
     {
-        let cell = buffer.getChar (atBufferRelative: position)
+        let cell = buffer.getChar(atBufferRelative: normalizedCharacterPosition(position, in: buffer))
         return terminal.getCharacter (for: cell)
     }
 
@@ -619,11 +639,7 @@ class SelectionService: CustomDebugStringConvertible {
      */
     public func selectWordOrExpression (at uncheckedPosition: Position, in buffer: Buffer)
     {
-//        let position = Position(
-//            col: max (min (uncheckedPosition.col, buffer.cols-1), 0),
-//            row: max (min (uncheckedPosition.row, buffer.rows-1+buffer.yDisp), buffer.yDisp))
-        let position = Position (col: (min (terminal.cols, max (uncheckedPosition.col, 0))),
-                                 row: (max (uncheckedPosition.row, 0)))
+        let position = normalizedCharacterPosition(uncheckedPosition, in: buffer)
         switch character (at: position, in: buffer) {
         case Character(UnicodeScalar(0)):
             simpleScanSelection (from: position, in: buffer) { ch in ch == nullChar }
@@ -645,9 +661,14 @@ class SelectionService: CustomDebugStringConvertible {
         case "}":
             balancedSearchBackward(from: position, in: buffer)
         default:
-            // For other characters, we just stop there
+            // Select one complete terminal character. Wide characters occupy
+            // two cells; the end position is exclusive.
+            let cell = buffer.getChar(atBufferRelative: position)
             start = position
-            end = position
+            end = Position(
+                col: min(terminal.cols, position.col + max(1, Int(cell.width))),
+                row: position.row
+            )
         }
         selectionMode = .word
         wordSelectionAnchor = (start, end)

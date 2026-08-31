@@ -32,6 +32,56 @@ public extension Notification.Name {
     static let terminalViewMetaModifierReset = Notification.Name("SwiftTerm.TerminalView.metaModifierReset")
 }
 
+private final class SelectionMagnifierView: UIView {
+    private weak var sourceView: UIView?
+    private var sourcePoint = CGPoint.zero
+    private let zoom: CGFloat = 1.8
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        contentMode = .redraw
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.28
+        layer.shadowRadius = 8
+        layer.shadowOffset = CGSize(width: 0, height: 3)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(sourceView: UIView, sourcePoint: CGPoint) {
+        self.sourceView = sourceView
+        self.sourcePoint = sourcePoint
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: 14).cgPath
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let sourceView, let context = UIGraphicsGetCurrentContext() else { return }
+
+        let outerPath = UIBezierPath(roundedRect: bounds, cornerRadius: 14)
+        UIColor.systemBackground.setFill()
+        outerPath.fill()
+
+        let contentRect = bounds.insetBy(dx: 4, dy: 4)
+        context.saveGState()
+        UIBezierPath(roundedRect: contentRect, cornerRadius: 11).addClip()
+        context.translateBy(x: contentRect.midX, y: contentRect.midY)
+        context.scaleBy(x: zoom, y: zoom)
+        context.translateBy(x: -sourcePoint.x, y: -sourcePoint.y)
+        sourceView.layer.render(in: context)
+        context.restoreGState()
+
+        UIColor.separator.setStroke()
+        outerPath.lineWidth = 1
+        outerPath.stroke()
+    }
+}
+
 /**
  * TerminalView provides an AppKit/UIKit front-end to the `Terminal` terminal emulator.
  * It is up to a subclass to either wire the terminal emulator to a remote terminal
@@ -518,6 +568,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     public func updateUiClosed() {
+        stopSelectionAutoScroll()
+        hideSelectionMagnifier()
         self.link.invalidate()
     }
     
@@ -742,13 +794,20 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 
     @objc func singleTap (_ gestureRecognizer: UITapGestureRecognizer)
     {
+        guard gestureRecognizer.view != nil, gestureRecognizer.state == .ended else { return }
+
+        // A host can keep a separate input proxy as first responder while this
+        // view owns rendering and selection. Exiting selection must therefore
+        // not depend on TerminalView itself being first responder.
+        if selection.active {
+            selection.selectNone()
+            disableSelectionPanGesture()
+            UIMenuController.shared.hideMenu()
+            queuePendingDisplay()
+            return
+        }
+
         if isFirstResponder {
-            guard gestureRecognizer.view != nil else { return }
-
-            if gestureRecognizer.state != .ended {
-                return
-            }
-
             let tapHit = calculateTapHit(gesture: gestureRecognizer).grid
             if let result = linkForClick(at: tapHit, hasCommandModifier: commandActive) {
                 terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
@@ -762,10 +821,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
                     sharedMouseEvent(gestureRecognizer: gestureRecognizer, release: true)
                 }
             } else {
-                if selection.active {
-                    selection.selectNone()
-                    disableSelectionPanGesture()
-                }
                 if UIMenuController.shared.isMenuVisible {
                     UIMenuController.shared.hideMenu()
                 } else {
@@ -833,84 +888,6 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
     
-    var directionView: UIView?
-    var directionCount: Int = 0
-    var lastCursorImage: String? = nil
-    func createDirectionView () -> UIView {
-        let timeout = 0.5
-        if directionView == nil {
-            let w = 80
-            let h = 80
-            let f = frame
-            directionView = UIView (
-                frame: CGRect (x: (Int (f.width)-w)/2,
-                               y: (Int(f.height)-w)/2,
-                               width: w,
-                               height: h))
-            addSubview(directionView!)
-        }
-        let dv = directionView!
-        dv.backgroundColor = UIColor.gray
-        dv.alpha = 0.5
-        
-        directionCount += 1
-        DispatchQueue.main.asyncAfter (deadline: .now() + timeout) {
-            self.directionCount -= 1
-            if self.directionCount == 0 {
-                if let dv = self.directionView {
-                    self.directionView = nil
-                    UIView.animate(withDuration: 0.3, animations: {
-                        dv.alpha = 0
-                    }, completion: { x in
-                        dv.removeFromSuperview()
-                    })
-                }
-            }
-        }
-        return dv
-    }
-    
-    func sendKey (deltaCol: Int, deltaRow: Int) {
-        if deltaCol == 0 && deltaRow == 0 { return }
-        let host = createDirectionView()
-        var imgName: String? = nil
-        if deltaRow > 0 {
-            imgName = "arrow.up.square.fill"
-            sendKeyUp()
-        } else if deltaRow < 0 {
-            imgName = "arrow.down.square.fill"
-            sendKeyDown()
-        }
-        if deltaCol > 0 {
-            imgName = "arrow.left.square.fill"
-            sendKeyLeft()
-        } else if deltaCol < 0 {
-            imgName = "arrow.right.square.fill"
-            sendKeyRight()
-        }
-        if imgName == nil {
-            print ("What?")
-        }
-        guard let name = imgName else { return }
-
-        if lastCursorImage == name { return }
-        guard let img = UIImage(systemName: name) else { return }
-        lastCursorImage = name
-        if let child = host.subviews.first {
-            child.removeFromSuperview()
-        }
-
-        let imgView = UIImageView (image: img)
-        host.addSubview (imgView)
-        imgView.translatesAutoresizingMaskIntoConstraints = false
-        imgView.center = host.center
-        imgView.topAnchor.constraint(equalTo: host.topAnchor, constant: 0).isActive = true
-        imgView.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: 0).isActive = true
-        imgView.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: 0).isActive = true
-        imgView.bottomAnchor.constraint(equalTo: host.bottomAnchor, constant: 0).isActive = true
-        imgView.tintColor = .white
-    }
-    
     @objc func panMouseHandler (_ gestureRecognizer: UIPanGestureRecognizer){
         guard gestureRecognizer.view != nil else { return }
         if allowMouseReporting && !shiftBypassesMouseReporting(for: gestureRecognizer) && terminal.mouseMode != .off {
@@ -937,84 +914,259 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         }
     }
    
-    @MainActor
-    func startSelectionTimer (_ callback: @MainActor @escaping ()->()) {
-        panTask = Task {
-            while !Task.isCancelled {
-                callback ()
-                try? await Task.sleep(nanoseconds: 100_000_000)
+    /// Height of the top/bottom zones that scroll while a selection handle is
+    /// being dragged. Keeping the zone inside the visible viewport means users
+    /// do not have to move their finger outside the device screen to trigger it.
+    private let selectionAutoScrollEdge: CGFloat = 48
+    private let selectionAutoScrollInterval: UInt64 = 60_000_000
+    private var selectionAutoScrollTask: Task<(), Never>?
+    private var selectionAutoScrollGeneration = 0
+    private var selectionMagnifier: SelectionMagnifierView?
+
+    private func isNearSelectionHandle (_ hit: Position) -> Bool {
+        guard selection.active else { return false }
+        func near (_ first: Position, _ second: Position) -> Bool {
+            abs(first.col - second.col) < 3 && abs(first.row - second.row) < 2
+        }
+        return near(selection.start, hit) || near(selection.end, hit)
+    }
+
+    /// The part of the terminal that is actually visible after all clipping
+    /// ancestors are considered. Embedders can put TerminalView inside another
+    /// UIScrollView (for example, to show a terminal taller than the screen), so
+    /// `bounds` alone is not necessarily the user's viewport.
+    private func visibleSelectionViewport () -> CGRect {
+        var viewport = bounds
+        var ancestor = superview
+        while let view = ancestor, !viewport.isNull, !viewport.isEmpty {
+            if view.clipsToBounds {
+                viewport = viewport.intersection(convert(view.bounds, from: view))
             }
+            ancestor = view.superview
         }
+        return viewport
     }
-    
-    func stopSelectionTimer () {
-        panTask?.cancel()
-        panTask = nil
-    }
-    
-    // The start of the pan operation, for the case where we are not sending the input to the client
-    var panStart: Position?
-    var panTask: Task<(),Never>?
-    
-    @objc func panSelectionHandler (_ gestureRecognizer: UIPanGestureRecognizer) {
-        func near (_ pos1: Position, _ pos2: Position) -> Bool {
-            return abs (pos1.col-pos2.col) < 3 && abs (pos1.row-pos2.row) < 2
+
+    private func selectionPoint (_ gestureRecognizer: UIGestureRecognizer) -> CGPoint {
+        var point = gestureRecognizer.location(in: self)
+        let viewport = visibleSelectionViewport()
+        if !viewport.isNull, !viewport.isEmpty {
+            // Stay inside the final visible row. SelectionService expects a
+            // buffer position and does not clamp rows in pivotExtend itself.
+            let lastVisibleY = max(viewport.minY, viewport.maxY - 1)
+            point.y = min(max(point.y, viewport.minY), lastVisibleY)
         }
-        
-        switch gestureRecognizer.state {
-        case .began:
-            let hit = calculateTapHit(gesture: gestureRecognizer).grid
-            if selection.active {
-                var extend = false
-                if near (selection.start, hit) {
-                    selection.pivot = selection.end
-                    extend = true
-                } else if near (selection.end, hit) {
-                    selection.pivot = selection.start
-                    extend = true
-                }
-                if extend {
-                    selection.pivotExtend(bufferPosition: hit)
-                    requestDisplay()
+        return point
+    }
+
+    private func selectionHit (_ gestureRecognizer: UIGestureRecognizer) -> Position {
+        calculateTapHit(point: selectionPoint(gestureRecognizer)).grid
+    }
+
+    /// Returns one to three rows per tick. The speed increases as the finger
+    /// approaches (or passes) the viewport edge without introducing animated
+    /// scroll operations that can overlap each other.
+    private func selectionAutoScrollDelta (_ gestureRecognizer: UIGestureRecognizer) -> CGFloat {
+        let viewport = visibleSelectionViewport()
+        guard !viewport.isNull, !viewport.isEmpty, cellDimension.height > 0 else { return 0 }
+
+        let edge = min(selectionAutoScrollEdge, viewport.height / 4)
+        guard edge > 0 else { return 0 }
+
+        let y = gestureRecognizer.location(in: self).y
+        let intensity: CGFloat
+        let direction: CGFloat
+        if y < viewport.minY + edge {
+            intensity = min(1, max(0, (viewport.minY + edge - y) / edge))
+            direction = -1
+        } else if y > viewport.maxY - edge {
+            intensity = min(1, max(0, (y - (viewport.maxY - edge)) / edge))
+            direction = 1
+        } else {
+            return 0
+        }
+
+        let rows = 1 + Int(floor(intensity * 2))
+        return direction * CGFloat(rows) * cellDimension.height
+    }
+
+    private func updateSelectionMagnifier (_ gestureRecognizer: UIPanGestureRecognizer) {
+        guard let overlay = window else { return }
+
+        let size = CGSize(width: 124, height: 62)
+        let touchPoint = convert(gestureRecognizer.location(in: self), to: overlay)
+        let sourcePoint = selectionPoint(gestureRecognizer)
+        let horizontalMargin: CGFloat = 8
+        let verticalMargin: CGFloat = 8
+        let fingerClearance: CGFloat = 28
+        let minimumX = overlay.bounds.minX + horizontalMargin
+        let maximumX = overlay.bounds.maxX - horizontalMargin - size.width
+        let safeTop = overlay.bounds.minY + overlay.safeAreaInsets.top + verticalMargin
+        let safeBottom = overlay.bounds.maxY - overlay.safeAreaInsets.bottom - verticalMargin
+
+        let originX = min(max(touchPoint.x - size.width / 2, minimumX), maximumX)
+        var originY = touchPoint.y - size.height - fingerClearance
+        if originY < safeTop {
+            originY = min(touchPoint.y + fingerClearance, safeBottom - size.height)
+        }
+
+        let magnifier: SelectionMagnifierView
+        if let selectionMagnifier {
+            magnifier = selectionMagnifier
+        } else {
+            magnifier = SelectionMagnifierView(frame: CGRect(origin: .zero, size: size))
+            overlay.addSubview(magnifier)
+            selectionMagnifier = magnifier
+        }
+        magnifier.frame = CGRect(origin: CGPoint(x: originX, y: originY), size: size)
+        magnifier.update(sourceView: self, sourcePoint: sourcePoint)
+    }
+
+    private func hideSelectionMagnifier () {
+        selectionMagnifier?.removeFromSuperview()
+        selectionMagnifier = nil
+    }
+
+    /// Moves an enclosing scroll view by as much of `delta` as it can consume
+    /// and returns the signed distance actually moved.
+    private func scrollSelectionViewport (_ scrollView: UIScrollView, by delta: CGFloat) -> CGFloat {
+        guard scrollView.isScrollEnabled else { return 0 }
+        let minimumY = -scrollView.adjustedContentInset.top
+        let maximumY = max(
+            minimumY,
+            scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+        )
+        let oldY = scrollView.contentOffset.y
+        let newY = min(max(oldY + delta, minimumY), maximumY)
+        guard abs(newY - oldY) > contentOffsetTolerance else { return 0 }
+        scrollView.setContentOffset(
+            CGPoint(x: scrollView.contentOffset.x, y: newY),
+            animated: false
+        )
+        return newY - oldY
+    }
+
+    /// Programmatic selection scrolling must update both UIScrollView and the
+    /// terminal buffer's yDisp. Normal drag scrolling gets this from
+    /// `isTracking`, but the active recognizer here is the selection pan.
+    private func scrollSelectionHistory (by delta: CGFloat) -> CGFloat {
+        guard terminal != nil, cellDimension.height > 0 else { return 0 }
+
+        let oldY = contentOffset.y
+        let maximumY = maxContentOffsetY()
+        let newY = min(max(oldY + delta, 0), maximumY)
+        guard abs(newY - oldY) > contentOffsetTolerance else { return 0 }
+
+        let displayBuffer = terminal.displayBuffer
+        let maximumRow = maxDisplayRow(in: displayBuffer)
+        let atBottomThreshold = max(contentOffsetTolerance, cellDimension.height / 2)
+        if newY >= maximumY - atBottomThreshold {
+            resetManualScrollTracking()
+        } else {
+            let row = max(0, min(maximumRow, Int(floor(newY / cellDimension.height))))
+            manualScrollOffsetWithinRow = newY - CGFloat(row) * cellDimension.height
+            setManualScrolling(true)
+            if displayBuffer.yDisp != row {
+                terminal.setViewYDisp(row)
+            }
+            setContentOffsetFromTerminal(CGPoint(x: contentOffset.x, y: newY))
+        }
+        return contentOffset.y - oldY
+    }
+
+    /// Scrolls the nearest enclosing viewport(s) before moving terminal history.
+    /// This preserves the natural visual order for a tall terminal: first reveal
+    /// the hidden rows of the current terminal screen, then enter scrollback.
+    @discardableResult
+    private func autoScrollSelection (_ gestureRecognizer: UIPanGestureRecognizer) -> Bool {
+        let requested = selectionAutoScrollDelta(gestureRecognizer)
+        var remaining = requested
+        guard remaining != 0 else { return false }
+
+        var ancestor = superview
+        while let view = ancestor, abs(remaining) > contentOffsetTolerance {
+            if let scrollView = view as? UIScrollView {
+                remaining -= scrollSelectionViewport(scrollView, by: remaining)
+            }
+            ancestor = view.superview
+        }
+        if abs(remaining) > contentOffsetTolerance {
+            remaining -= scrollSelectionHistory(by: remaining)
+        }
+
+        let moved = abs(requested - remaining) > contentOffsetTolerance
+        if moved {
+            selection.pivotExtend(bufferPosition: selectionHit(gestureRecognizer))
+            requestDisplay()
+            updateSelectionMagnifier(gestureRecognizer)
+        }
+        return moved
+    }
+
+    @MainActor
+    private func startSelectionAutoScroll (_ gestureRecognizer: UIPanGestureRecognizer) {
+        guard selectionAutoScrollTask == nil else { return }
+        selectionAutoScrollGeneration &+= 1
+        let generation = selectionAutoScrollGeneration
+        selectionAutoScrollTask = Task { @MainActor [weak self, weak gestureRecognizer] in
+            guard let self, let gestureRecognizer else { return }
+            while !Task.isCancelled,
+                  gestureRecognizer.state == .began || gestureRecognizer.state == .changed,
+                  self.selection.active,
+                  self.autoScrollSelection(gestureRecognizer)
+            {
+                do {
+                    try await Task.sleep(nanoseconds: self.selectionAutoScrollInterval)
+                } catch {
                     break
                 }
             }
-            panStart = hit
-        case .changed:
-            let absoluteY = gestureRecognizer.location (in: self).y - contentOffset.y
-            let hit = calculateTapHit(gesture: gestureRecognizer).grid
-            if selection.active {
-                stopSelectionTimer()
+            if self.selectionAutoScrollGeneration == generation {
+                self.selectionAutoScrollTask = nil
+            }
+        }
+    }
+
+    private func stopSelectionAutoScroll () {
+        selectionAutoScrollGeneration &+= 1
+        selectionAutoScrollTask?.cancel()
+        selectionAutoScrollTask = nil
+    }
+    
+    @objc func panSelectionHandler (_ gestureRecognizer: UIPanGestureRecognizer) {
+        switch gestureRecognizer.state {
+        case .began:
+            let hit = selectionHit(gestureRecognizer)
+            if isNearSelectionHandle(hit) {
+                selection.pivot = abs(selection.start.row - hit.row) < 2 && abs(selection.start.col - hit.col) < 3
+                    ? selection.end
+                    : selection.start
                 selection.pivotExtend(bufferPosition: hit)
+                requestDisplay()
+                updateSelectionMagnifier(gestureRecognizer)
+            }
+        case .changed:
+            if selection.active {
+                selection.pivotExtend(bufferPosition: selectionHit(gestureRecognizer))
                 gestureRecognizer.setTranslation(CGPoint.zero, in: self)
-                if absoluteY < 0 || absoluteY > bounds.height {
-                    startSelectionTimer {
-                        let newPlace = CGRect (x: 0, y: max (0, self.contentOffset.y+absoluteY), width: self.bounds.width, height: self.bounds.height)
-                        self.scrollRectToVisible(newPlace, animated: true)
-                    }
+                if selectionAutoScrollDelta(gestureRecognizer) == 0 {
+                    stopSelectionAutoScroll()
+                } else {
+                    startSelectionAutoScroll(gestureRecognizer)
                 }
                 requestDisplay()
-            } else {
-                if let ps = panStart {
-                    let deltaRow = ps.row - hit.row
-                    if allowMouseReporting {
-                        // TODO: what scenario would have this?
-                        scrollDown (lines: deltaRow)
-                    } else {
-                        let deltaCol = ps.col - hit.col
-                        
-                        sendKey (deltaCol: deltaCol, deltaRow: deltaRow)
-                    }
-                }
+                updateSelectionMagnifier(gestureRecognizer)
             }
         case .ended:
-            stopSelectionTimer()
+            stopSelectionAutoScroll()
+            hideSelectionMagnifier()
             if selection.active {
-                showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: calculateTapHit(gesture: gestureRecognizer).grid)
+                showContextMenu(forRegion: makeContextMenuRegionForSelection(), pos: selectionHit(gestureRecognizer))
             }
             break
-        case .cancelled:
-            stopSelectionTimer()
+        case .cancelled, .failed:
+            stopSelectionAutoScroll()
+            hideSelectionMagnifier()
             selection.active = false
         default:
             break
@@ -1040,21 +1192,48 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     var panSelectionGesture: UIPanGestureRecognizer?
+
+    /// A selection drag only owns the touch when it begins on one of the two
+    /// handles. Pans elsewhere fail immediately and fall through to the normal
+    /// UIScrollView chain while the selection remains active.
+    open override func gestureRecognizerShouldBegin (_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer === panSelectionGesture {
+            return isNearSelectionHandle(selectionHit(gestureRecognizer))
+        }
+        return super.gestureRecognizerShouldBegin(gestureRecognizer)
+    }
+
+    /// Gives a handle drag exclusive ownership of its touch. Scroll gestures
+    /// wait only until the selection pan decides whether the touch began on a
+    /// handle: a handle drag selects, while every other drag scrolls normally.
+    private func prioritizeSelectionPan (_ selectionPan: UIPanGestureRecognizer) {
+        panGestureRecognizer.require(toFail: selectionPan)
+
+        var ancestor = superview
+        while let view = ancestor {
+            if let scrollView = view as? UIScrollView {
+                scrollView.panGestureRecognizer.require(toFail: selectionPan)
+            }
+            ancestor = view.superview
+        }
+    }
+
     func enableSelectionPanGesture () {
-        guard panSelectionGesture == nil else {
+        if let gesture = panSelectionGesture {
+            gesture.isEnabled = true
             return
         }
         let gesture = UIPanGestureRecognizer (target: self, action: #selector(panSelectionHandler))
+        gesture.maximumNumberOfTouches = 1
         addGestureRecognizer(gesture)
         self.panSelectionGesture = gesture
+        prioritizeSelectionPan(gesture)
     }
     
     func disableSelectionPanGesture() {
-        guard let gesture = panSelectionGesture else {
-            return
-        }
-        removeGestureRecognizer(gesture)
-        panSelectionGesture = nil
+        stopSelectionAutoScroll()
+        hideSelectionMagnifier()
+        panSelectionGesture?.isEnabled = false
     }
     
     func setupGestures ()

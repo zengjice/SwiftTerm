@@ -21,6 +21,24 @@ import MetalKit
 import os.log
 #endif
 
+struct MouseLinkActivationGestureState {
+    private(set) var didDrag = false
+
+    mutating func mouseDown(clickCount: Int) -> Bool {
+        didDrag = false
+        return clickCount > 1
+    }
+
+    mutating func mouseDragged() {
+        didDrag = true
+    }
+
+    mutating func mouseUp(clickCount: Int) -> Bool {
+        defer { didDrag = false }
+        return clickCount == 1 && !didDrag
+    }
+}
+
 /**
  * TerminalView provides an AppKit front-end to the `Terminal` termininal emulator.
  * It is up to a subclass to either wire the terminal emulator to a remote terminal
@@ -204,6 +222,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     private var findBarOptions: SearchOptions = SearchOptions()
     var debug: TerminalDebugView?
     var pendingDisplay: Bool = false
+    var coreGraphicsLineRenderCache = CoreGraphicsLineRenderCache<CoreGraphicsLineRenderState>()
     /// Output received shortly after local input is likely echo or prompt redraw;
     /// render it without the 16.67ms frame-rate throttle so typing feels responsive.
     var lastUserInputUptimeNs: UInt64 = 0
@@ -572,6 +591,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     
     deinit {
         stopWindowMouseMovedFallback()
+        pendingLinkActivationTimer?.invalidate()
         if let becomeMainObserver {
             NotificationCenter.default.removeObserver (becomeMainObserver)
         }
@@ -696,11 +716,18 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     /// Controls weather to use high ansi colors, if false terminal will use bold text instead of high ansi colors
-    public var useBrightColors: Bool = true
+    public var useBrightColors: Bool = true {
+        didSet {
+            coreGraphicsLineRenderCache.removeAll()
+            terminal.updateFullScreen()
+            queuePendingDisplay()
+        }
+    }
 
     /// When true, block element (U+2580-U+259F) and box drawing (U+2500-U+257F) characters use custom rendering.
     public var customBlockGlyphs: Bool = true {
         didSet {
+            coreGraphicsLineRenderCache.removeAll()
             terminal.updateFullScreen()
             queuePendingDisplay()
         }
@@ -892,6 +919,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     /// Controls link highlighting and link activation behavior.
     public var linkHighlightMode: LinkHighlightMode = .hoverWithModifier {
         didSet {
+            coreGraphicsLineRenderCache.removeAll()
             linkHighlightRange = nil
             updateLinkHighlightTracking()
             terminal.updateFullScreen()
@@ -2459,6 +2487,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
 
     open override func mouseDown(with event: NSEvent) {
+        if linkActivationGesture.mouseDown(clickCount: event.clickCount) {
+            cancelPendingLinkActivation()
+        }
+
         if allowMouseReporting && !shiftBypassesMouseReporting(for: event) && terminal.mouseMode.sendButtonPress() {
             sharedMouseEvent(with: event)
             return
@@ -2495,32 +2527,51 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         return cd.getPayload()
     }
     
-    var didSelectionDrag: Bool = false
+    private var linkActivationGesture = MouseLinkActivationGestureState()
+    private var pendingLinkActivationTimer: Timer?
     
     open override func mouseUp(with event: NSEvent) {
         stopSelectionAutoScrollTimer()
         autoScrollDelta = 0
         lastSelectionDragPoint = nil
+        let shouldActivateLink = linkActivationGesture.mouseUp(clickCount: event.clickCount)
         let hit = calculateMouseHit(with: event).grid
         updateHoverLink(at: hit, commandOverride: commandActive || event.modifierFlags.contains(.command))
-        if let result = linkForClick(at: hit, hasCommandModifier: event.modifierFlags.contains(.command)) {
-            terminalDelegate?.requestOpenLink(source: self, link: result.link, params: result.params)
+        if shouldActivateLink,
+           let result = linkForClick(at: hit, hasCommandModifier: event.modifierFlags.contains(.command)) {
+            scheduleLinkActivation(result)
             return
         }
         if allowMouseReporting && !shiftBypassesMouseReporting(for: event) && terminal.mouseMode.sendButtonRelease() {
             sharedMouseEvent(with: event)
             return
         }
-        
-        #if DEBUG
-        // let hit = calculateMouseHit(with: event)
-        //print ("Up at col=\(hit.col) row=\(hit.row) count=\(event.clickCount) selection.active=\(selection.active) didSelectionDrag=\(didSelectionDrag) ")
-        #endif
-        
-        didSelectionDrag = false
+    }
+
+    private func cancelPendingLinkActivation() {
+        pendingLinkActivationTimer?.invalidate()
+        pendingLinkActivationTimer = nil
+    }
+
+    private func scheduleLinkActivation(_ result: (link: String, params: [String: String])) {
+        cancelPendingLinkActivation()
+        pendingLinkActivationTimer = Timer.scheduledTimer(
+            withTimeInterval: NSEvent.doubleClickInterval,
+            repeats: false
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.pendingLinkActivationTimer = nil
+            self.terminalDelegate?.requestOpenLink(
+                source: self,
+                link: result.link,
+                params: result.params
+            )
+        }
     }
     
     open override func mouseDragged(with event: NSEvent) {
+        linkActivationGesture.mouseDragged()
+
         let displayBuffer = terminal.displayBuffer
         let mouseHit = calculateMouseHit(with: event)
         let hit = mouseHit.grid
@@ -2543,7 +2594,6 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             selection.setSoftStart(bufferPosition: Position(col: hit.col, row: hit.row))
             selection.startSelection()
         }
-        didSelectionDrag = true
         lastSelectionDragPoint = convert(event.locationInWindow, from: nil)
         autoScrollDelta = 0
         let screenRow = hit.row - displayBuffer.yDisp
