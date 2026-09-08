@@ -2151,8 +2151,6 @@ extension TerminalView {
     public func scroll (toPosition: Double)
     {
         let displayBuffer = terminal.displayBuffer
-        let oldPosition = displayBuffer.yDisp
-        
         let maxScrollback = max(0, displayBuffer.lines.count - displayBuffer.rows)
         var newScrollPosition = Int (Double (maxScrollback) * toPosition)
         
@@ -2163,11 +2161,11 @@ extension TerminalView {
             newScrollPosition = maxScrollback
         }
 
-        if newScrollPosition != oldPosition {
-            scrollTo(row: newScrollPosition)
-        } else {
-            updateUserScrollingState(for: newScrollPosition, in: displayBuffer)
-        }
+        // `scrollTo(row:)` also synchronizes the platform scroll view when the
+        // logical row is unchanged. This matters after a bounds/inset change:
+        // yDisp can already be at the requested row while the pixel viewport is
+        // still based on the previous geometry.
+        scrollTo(row: newScrollPosition)
     }
 
     private func updateUserScrollingState(for row: Int, in displayBuffer: Buffer) {

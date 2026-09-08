@@ -12,12 +12,12 @@ import XCTest
 
 @testable import SwiftTerm
 
-final class SelectionScrollTests: XCTestCase {
+final class SelectionScrollTests: XCTestCase, TerminalDelegate {
+
+    func send(source: Terminal, data: ArraySlice<UInt8>) { }
 
     private func makeTerminal (rows: Int = 10, cols: Int = 40) -> Terminal {
-        let headless = HeadlessTerminal (queue: nil) { _ in }
-        headless.terminal.resize (cols: cols, rows: rows)
-        return headless.terminal
+        Terminal(delegate: self, options: TerminalOptions(cols: cols, rows: rows))
     }
 
     private func paintLines (_ terminal: Terminal, count: Int) {

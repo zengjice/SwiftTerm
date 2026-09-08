@@ -1874,7 +1874,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         let originChanged = currentBounds.origin != lastLayoutBounds.origin
 
         if sizeChanged {
-            processSizeChange(newSize: currentBounds.size)
+            // The host may resize the emulator before Auto Layout updates our
+            // bounds. Matching rows/columns do not imply a matching pixel
+            // viewport: the old height may have clamped contentOffset.
+            if !processSizeChange(newSize: currentBounds.size) {
+                updateScroller()
+            }
             updateCursorPosition()
         }
 
@@ -1894,6 +1899,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
 #endif
 
         lastLayoutBounds = currentBounds
+    }
+
+    open override func adjustedContentInsetDidChange() {
+        super.adjustedContentInsetDidChange()
+        guard didFinishSetup else { return }
+        // Insets change the native scroll limit without changing the grid.
+        // Keep the existing drag/history policy rather than forcing the tail.
+        updateScroller()
     }
 
     open override var contentOffset: CGPoint {
