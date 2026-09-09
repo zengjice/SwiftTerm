@@ -19,7 +19,7 @@ struct IOSSelectionTapTests {
     }
 
     @Test(arguments: [2, 3], [1, 25])
-    func vetoConsumesTapBeforeAnySelectionOrMenu(tapCount: Int, column: Int) {
+    func vetoStillOpensMenuWithoutStartingSelection(tapCount: Int, column: Int) {
         let view = makeView()
         view.allowsSelection = false
         let offset = view.contentOffset
@@ -30,7 +30,12 @@ struct IOSSelectionTapTests {
         #expect(view.checkedPositions == [Position(col: column, row: 0)])
         #expect(!view.selection.active)
         #expect(view.panSelectionGesture == nil)
-        #expect(view.lastLongSelect == nil)
+        #expect(view.lastLongSelect == Position(col: column, row: 0))
+        #expect(view.lastLongSelectRegion == view.makeContextMenuRegionForTap(point: gesture.point))
+        #expect(!view.canPerformAction(#selector(view.copy(_:)), withSender: nil))
+        #expect(view.canPerformAction(#selector(view.paste(_:)), withSender: nil))
+        #expect(view.canPerformAction(#selector(view.select(_:)), withSender: nil))
+        #expect(view.canPerformAction(#selector(view.selectAll(_:)), withSender: nil))
         #expect(view.contentOffset == offset)
         #expect(Position(col: view.getTerminal().buffer.x, row: view.getTerminal().buffer.y) == cursor)
         // A rejected selection must not fail/disable its recognized multi-tap.
@@ -44,7 +49,6 @@ struct IOSSelectionTapTests {
         tap(view, count: 2, column: 1)
         let text = view.selection.getSelectedText()
         let handleGesture = view.panSelectionGesture
-        let menuPosition = view.lastLongSelect
         view.allowsSelection = false
 
         tap(view, count: tapCount, column: 25)
@@ -53,7 +57,43 @@ struct IOSSelectionTapTests {
         #expect(view.selection.getSelectedText() == text)
         #expect(view.panSelectionGesture === handleGesture)
         #expect(view.panSelectionGesture?.isEnabled == true)
-        #expect(view.lastLongSelect == menuPosition)
+        #expect(view.lastLongSelect == Position(col: 25, row: 0))
+        #expect(view.canPerformAction(#selector(view.copy(_:)), withSender: nil))
+    }
+
+    @Test(arguments: [2, 3])
+    func explicitSelectAfterMenuOnlyTapStillSelectsTheTappedWord(tapCount: Int) {
+        let view = makeView()
+        view.allowsSelection = false
+        tap(view, count: tapCount, column: 7)
+        #expect(!view.selection.active)
+
+        view.select(nil)
+
+        #expect(view.selection.getSelectedText() == "world")
+        #expect(view.panSelectionGesture?.isEnabled == true)
+        #expect(view.canPerformAction(#selector(view.copy(_:)), withSender: nil))
+        #expect(!view.canPerformAction(#selector(view.select(_:)), withSender: nil))
+        #expect(view.checkedPositions.count == 1)
+    }
+
+    @Test
+    func menuOnlyTapRetainsBufferCoordinatesAfterScrolling() {
+        let view = makeView()
+        view.allowsSelection = false
+        for line in 0..<100 { view.feed(text: "\r\nline \(line)") }
+        view.scroll(toPosition: 1)
+        let row = view.getTerminal().buffer.y + view.getTerminal().buffer.yDisp
+        let gesture = makeTap(view, count: 2, column: 1)
+        gesture.point.y = (CGFloat(row) + 0.5) * view.cellDimension.height
+        let offset = view.contentOffset
+
+        view.doubleTap(gesture)
+
+        #expect(view.lastLongSelect == Position(col: 1, row: row))
+        #expect(view.lastLongSelectRegion == view.makeContextMenuRegionForTap(point: gesture.point))
+        #expect(view.contentOffset == offset)
+        #expect(!view.selection.active)
     }
 
     @Test

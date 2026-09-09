@@ -841,9 +841,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     /// Whether a double or triple tap may start a local text selection at a
     /// buffer-relative position. Hosts can reserve an input row without
-    /// disabling the tap recognizer: returning false consumes the tap without
-    /// falling through to single-tap actions, changing selection or showing a
-    /// menu. Mouse reporting, explicit selection and handle drags are unchanged.
+    /// disabling the tap recognizer: returning false shows the standard menu
+    /// at the tap without changing selection or falling through to single-tap
+    /// actions. Explicit Select/Select All remain available. Mouse reporting
+    /// and handle drags are unchanged.
     open func shouldBeginSelection(at position: Position) -> Bool {
         true
     }
@@ -865,11 +866,14 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         } else {
             let hit = calculateTapHit(gesture: gestureRecognizer).grid
-            guard shouldBeginSelection(at: hit) else { return }
-            selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
-            selection.selectionMode = .character
-            enableSelectionPanGesture()
-            showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
+            if shouldBeginSelection(at: hit) {
+                selection.selectWordOrExpression(at: hit, in: terminal.displayBuffer)
+                selection.selectionMode = .character
+                enableSelectionPanGesture()
+                showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
+            } else {
+                showContextMenu(forRegion: makeContextMenuRegionForTap(point: gestureRecognizer.location(in: self)), pos: hit)
+            }
             queuePendingDisplay()
         }
     }
@@ -891,10 +895,13 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             return
         } else {
             let hit = calculateTapHit(gesture: gestureRecognizer).grid
-            guard shouldBeginSelection(at: hit) else { return }
-            selection.select(row: hit.row)
-            enableSelectionPanGesture()
-            showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
+            if shouldBeginSelection(at: hit) {
+                selection.select(row: hit.row)
+                enableSelectionPanGesture()
+                showContextMenu (forRegion: makeContextMenuRegionForSelection(), pos: hit)
+            } else {
+                showContextMenu(forRegion: makeContextMenuRegionForTap(point: gestureRecognizer.location(in: self)), pos: hit)
+            }
             queuePendingDisplay()
         }
     }
