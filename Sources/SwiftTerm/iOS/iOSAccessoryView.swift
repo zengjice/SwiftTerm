@@ -19,6 +19,30 @@ import UIKit
  * `controlModifer` should be set if the control key is pressed
  */
 public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
+    /// Presentation-only options; button actions and terminal input handling stay unchanged.
+    public struct Configuration: Equatable, Sendable {
+        public var showsHorizontalArrows: Bool
+        public var showsFunctionKeys: Bool
+        public var buttonHeight: CGFloat?
+
+        public init(showsHorizontalArrows: Bool = true, showsFunctionKeys: Bool = true,
+                    buttonHeight: CGFloat? = nil) {
+            self.showsHorizontalArrows = showsHorizontalArrows
+            self.showsFunctionKeys = showsFunctionKeys
+            self.buttonHeight = buttonHeight
+        }
+    }
+
+    public var configuration = Configuration() {
+        didSet {
+            guard configuration != oldValue else { return }
+            frame.size.height = configuration.buttonHeight.map { $0 + 8 } ?? defaultHeight
+            invalidateIntrinsicContentSize()
+            setupUI()
+        }
+    }
+    private let defaultHeight: CGFloat
+
     /// This points to an instanace of the `TerminalView` where events are sent
     public weak var terminalView: TerminalView?
     weak var terminal: Terminal?
@@ -37,6 +61,7 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
     
     public init (frame: CGRect, inputViewStyle: UIInputView.Style, container: TerminalView)
     {
+        self.defaultHeight = frame.height
         self.terminalView = container
         self.terminal = terminalView?.getTerminal()
         super.init (frame: frame, inputViewStyle: inputViewStyle)
@@ -209,10 +234,15 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
             leftViews.append(makeButton("", #selector(tab), icon: "arrow.right.to.line.compact", isNormal: false))
             //leftViews.append(makeButton ("tab", #selector(tab)))
         }
-        rightViews.append(makeAutoRepeatButton ("arrow.left", #selector(left)))
+        controlButton?.isSelected = controlModifier
+        if configuration.showsHorizontalArrows {
+            rightViews.append(makeAutoRepeatButton ("arrow.left", #selector(left)))
+        }
         rightViews.append(makeAutoRepeatButton ("arrow.down", #selector(down)))
         rightViews.append(makeAutoRepeatButton ("arrow.up", #selector(up)))
-        rightViews.append(makeAutoRepeatButton ("arrow.right", #selector(right)))
+        if configuration.showsHorizontalArrows {
+            rightViews.append(makeAutoRepeatButton ("arrow.right", #selector(right)))
+        }
         touchButton = makeButton ("", #selector(toggleTouch), icon: "hand.draw", isNormal: false)
         touchButton.isSelected = !(terminalView?.allowMouseReporting ?? false)
         rightViews.append (touchButton)
@@ -273,6 +303,7 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         }
         var left = frame.width - usedSpace - additionalUsedSpaceToAdd
         func addOptional (_ text: String, _ selector: Selector) {
+            guard configuration.showsFunctionKeys else { return }
             left -= minWidth + buttonPad
             
             if left > 0 {
@@ -320,7 +351,19 @@ return
     var buttonPad = 4.0
     public override func layoutSubviews() {
         var x: CGFloat = 2
-        let dh = views.reduce (0) { max ($0, $1.frame.size.height )}
+        let dh = configuration.buttonHeight ?? views.reduce (0) { max ($0, $1.frame.size.height )}
+
+        // Without optional function keys, distribute the remaining controls
+        // across the row instead of leaving a gap or inserting replacement keys.
+        if !configuration.showsFunctionKeys, !views.isEmpty {
+            let gaps = buttonPad * CGFloat(views.count - 1)
+            let width = max(0, (bounds.width - 4 - gaps) / CGFloat(views.count))
+            for view in views {
+                view.frame = CGRect(x: x, y: 4, width: width, height: dh)
+                x += width + buttonPad
+            }
+            return
+        }
         
         for view in leftViews + floatViews {
             let size = view.frame.size

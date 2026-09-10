@@ -415,6 +415,10 @@ open class Terminal {
     // reset() will do that again
     var sendFocus: Bool = false
     var cursorHidden : Bool = false
+
+    /// Whether DECTCEM currently exposes the cursor. Consumers of cursor
+    /// feedback must not use temporary cursor positions during a hidden redraw.
+    public var isCursorVisible: Bool { !cursorHidden }
     
     /// Controls the origin mode (DECOM), when set, the screen is limited to the top and bottom margins
     var originMode: Bool = false
