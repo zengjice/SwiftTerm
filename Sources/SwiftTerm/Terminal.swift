@@ -350,6 +350,16 @@ open class Terminal {
         selections.append (WeakSelection (value: selection))
     }
 
+    /// Buffer-relative anchors cannot survive buffer replacement or grid reflow.
+    /// Keep this at the model boundary: callers may reset/resize the terminal
+    /// directly, without passing bytes through a platform TerminalView.
+    private func invalidateSelections ()
+    {
+        for entry in selections {
+            entry.value?.selectNone ()
+        }
+    }
+
     /// Notifies attached selections that `lines` rows were shifted up in place
     /// within the absolute row range `top...bottom`.
     func selectionsAdjustForInPlaceScroll (top: Int, bottom: Int, lines: Int)
@@ -842,6 +852,7 @@ open class Terminal {
         if buffer === normalBuffer {
             return
         }
+        invalidateSelections ()
         normalBuffer.x = altBuffer.x
         normalBuffer.y = altBuffer.y
         
@@ -860,6 +871,7 @@ open class Terminal {
         if buffer === altBuffer {
             return
         }
+        invalidateSelections ()
         altBuffer.x = normalBuffer.x
         altBuffer.y = normalBuffer.y
         
@@ -5612,6 +5624,7 @@ open class Terminal {
         if newCols == self.cols && newRows == self.rows {
             return
         }
+        invalidateSelections ()
         endSynchronizedOutput ()
         let oldCols = self.cols
         resizeBuffers(newColumns: newCols, newRows: newRows)

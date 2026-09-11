@@ -2246,10 +2246,15 @@ extension TerminalView {
     func feedPrepare()
     {
         search.invalidate()
+        #if !os(macOS)
         // Preserve manual selection while output is streaming when mouse reporting is disabled.
         if allowMouseReporting {
             selection.active = false
         }
+        #endif
+        // On macOS, local selection is independent of mouse-reporting permission.
+        // Cursor updates and output elsewhere must not cancel a user's drag.
+        // Buffer replacement/resize and explicit user input own invalidation.
         startDisplayUpdates()
     }
     

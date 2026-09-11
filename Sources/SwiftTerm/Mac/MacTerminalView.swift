@@ -901,10 +901,9 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     open func linefeed(source: Terminal) {
-        // Preserve manual selection while output is streaming when mouse reporting is disabled.
-        if allowMouseReporting {
-            selection.selectNone()
-        }
+        // The terminal translates selection anchors when rows actually scroll,
+        // and invalidates selections whose text is evicted. A linefeed alone
+        // does not invalidate a local selection, even with mouse reporting on.
     }
     
     /// This vaiable controls whether mouse events are sent to the application running under the
@@ -1016,7 +1015,8 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     public override func resizeSubviews(withOldSize oldSize: NSSize) {
         super.resizeSubviews(withOldSize: oldSize)
         updateScroller()
-        selection.active = false
+        // processSizeChange/Terminal.resize handle actual grid changes. AppKit
+        // can lay out subviews without changing a single terminal row or column.
         updateProgressBarFrame()
     }
     
@@ -1567,6 +1567,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         markedSelectedRange = NSRange(location: NSNotFound, length: 0)
         updateMarkedTextOverlay()
         if let str = string as? NSString {
+            selection.selectNone()
             if !terminal.keyboardEnhancementFlags.isEmpty {
                 if isPaste, terminal.bracketedPasteMode {
                     pendingKittyKeyEvent = nil
@@ -2492,6 +2493,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
 
         if allowMouseReporting && !shiftBypassesMouseReporting(for: event) && terminal.mouseMode.sendButtonPress() {
+            selection.selectNone()
             sharedMouseEvent(with: event)
             return
         }
