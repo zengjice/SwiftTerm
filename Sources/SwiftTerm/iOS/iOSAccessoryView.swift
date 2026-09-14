@@ -24,12 +24,14 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         public var showsHorizontalArrows: Bool
         public var showsFunctionKeys: Bool
         public var buttonHeight: CGFloat?
+        public var showsEscapeKey: Bool
 
         public init(showsHorizontalArrows: Bool = true, showsFunctionKeys: Bool = true,
-                    buttonHeight: CGFloat? = nil) {
+                    buttonHeight: CGFloat? = nil, showsEscapeKey: Bool = true) {
             self.showsHorizontalArrows = showsHorizontalArrows
             self.showsFunctionKeys = showsFunctionKeys
             self.buttonHeight = buttonHeight
+            self.showsEscapeKey = showsEscapeKey
         }
     }
 
@@ -221,13 +223,17 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         terminalView?.setupKeyboardButtonColors ()
         let useSmall = self._useSmall
         if useSmall {
-            leftViews.append(makeButton("", #selector(esc), icon: "escape", isNormal: false))
+            if configuration.showsEscapeKey {
+                leftViews.append(makeButton("", #selector(esc), icon: "escape", isNormal: false))
+            }
             let controlButton = makeButton("", #selector(ctrl), icon: "control", isNormal: false)
             leftViews.append(controlButton)
             self.controlButton = controlButton
             leftViews.append(makeButton("", #selector(tab), icon: "arrow.right.to.line.compact"))
         } else {
-            leftViews.append(makeButton ("esc", #selector(esc), isNormal: false))
+            if configuration.showsEscapeKey {
+                leftViews.append(makeButton ("esc", #selector(esc), isNormal: false))
+            }
             let controlButton = makeButton ("ctrl", #selector(ctrl), isNormal: false)
             leftViews.append(controlButton)
             self.controlButton = controlButton

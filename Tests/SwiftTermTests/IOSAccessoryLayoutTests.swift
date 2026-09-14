@@ -12,24 +12,28 @@ struct IOSAccessoryLayoutTests {
         let accessory = try #require(terminal.inputAccessoryView as? TerminalAccessory)
         accessory.setupUI()
 
+        #expect(accessory.configuration.showsEscapeKey)
+        #expect(hasButton(#selector(TerminalAccessory.esc(_:)), in: accessory))
         #expect(hasButton(#selector(TerminalAccessory.left(_:)), in: accessory))
         #expect(hasButton(#selector(TerminalAccessory.right(_:)), in: accessory))
         #expect(hasButton(#selector(TerminalAccessory.f1(_:)), in: accessory))
     }
 
     @Test("Compact configuration survives portrait, landscape and tablet widths",
-          arguments: [320.0, 375.0, 420.0, 852.0, 1024.0])
-    func compactLayout(width: Double) throws {
+          arguments: [320.0, 375.0, 420.0, 852.0, 1024.0], [true, false])
+    func compactLayout(width: Double, showsEscapeKey: Bool) throws {
         let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 420, height: 300))
         let accessory = try #require(terminal.inputAccessoryView as? TerminalAccessory)
         accessory.configuration = .init(showsHorizontalArrows: false,
-                                        showsFunctionKeys: false, buttonHeight: 32)
+                                        showsFunctionKeys: false, buttonHeight: 32,
+                                        showsEscapeKey: showsEscapeKey)
         accessory.controlModifier = true
         accessory.bounds.size.width = width
         accessory.layoutSubviews()
 
         #expect(accessory.bounds.height == 40)
-        #expect(accessory.views.count == 11)
+        #expect(accessory.views.count == (showsEscapeKey ? 11 : 10))
+        #expect(hasButton(#selector(TerminalAccessory.esc(_:)), in: accessory) == showsEscapeKey)
         #expect(!hasButton(#selector(TerminalAccessory.left(_:)), in: accessory))
         #expect(!hasButton(#selector(TerminalAccessory.right(_:)), in: accessory))
         #expect(!accessory.views.compactMap { $0 as? UIButton }.contains {
@@ -56,10 +60,12 @@ struct IOSAccessoryLayoutTests {
         let accessory = try #require(terminal.inputAccessoryView as? TerminalAccessory)
         let originalHeight = accessory.bounds.height
         accessory.configuration = .init(showsHorizontalArrows: false,
-                                        showsFunctionKeys: false, buttonHeight: 32)
+                                        showsFunctionKeys: false, buttonHeight: 32, showsEscapeKey: false)
+        #expect(!hasButton(#selector(TerminalAccessory.esc(_:)), in: accessory))
         accessory.configuration = .init()
 
         #expect(accessory.bounds.height == originalHeight)
+        #expect(hasButton(#selector(TerminalAccessory.esc(_:)), in: accessory))
         #expect(hasButton(#selector(TerminalAccessory.left(_:)), in: accessory))
         #expect(hasButton(#selector(TerminalAccessory.f1(_:)), in: accessory))
     }
