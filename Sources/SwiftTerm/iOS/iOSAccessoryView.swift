@@ -186,7 +186,7 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
             #else
             tv.inputView = KeyboardView (frame: CGRect (origin: CGPoint.zero,
                                                         size: CGSize (width: UIScreen.main.bounds.width,
-                                                                      height: max((UIScreen.main.bounds.height / 5),140))),
+                                                                      height: max(UIScreen.main.bounds.height / 5, KeyboardView.minimumHeight))),
                                          terminalView: terminalView)
             #endif
         } else {

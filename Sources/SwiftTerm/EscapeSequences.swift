@@ -76,6 +76,8 @@ public struct EscapeSequences {
     public static let cmdNewLine: [UInt8] = [ 10 ]
     /// Sent when the user pressed the return character
     public static let cmdRet: [UInt8] = [ 13 ]
+    /// Shift-Return as CSI-u, distinct from an unmodified Return.
+    public static let cmdShiftRet: [UInt8] = [ 0x1b, 0x5b, 0x31, 0x33, 0x3b, 0x32, 0x75 ]
     /// Sent when the user pressed the escape key
     public static let cmdEsc: [UInt8] = [ 0x1b ]
     /// Sent when the user pressed the backspace key (Delete on the Mac keyboard)
@@ -98,6 +100,11 @@ public struct EscapeSequences {
     public static let moveRightApp: [UInt8] = [ 0x1b, 0x4f, 0x43 ]
     /// Send in normal mode when the user presses the right arrow key
     public static let moveRightNormal: [UInt8] = [ 0x1b, 0x5b, 0x43 ]
+    /// Shift-arrow keys retain their modifier in both normal and application cursor modes.
+    public static let moveLeftShift: [UInt8] = [ 0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x44 ]
+    public static let moveRightShift: [UInt8] = [ 0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x43 ]
+    public static let moveUpShift: [UInt8] = [ 0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x41 ]
+    public static let moveDownShift: [UInt8] = [ 0x1b, 0x5b, 0x31, 0x3b, 0x32, 0x42 ]
     /// Send in application cursor mode when the user presses the home key
     public static let moveHomeApp: [UInt8] = [ 0x1b, 0x4f, 0x48 ]
     /// Send in normal mode when the user presses the home key

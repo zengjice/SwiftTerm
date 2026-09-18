@@ -9,6 +9,9 @@ import Foundation
 import UIKit
 
 class KeyboardView: UIView {
+    // Four rows with 44-point slots (36-point buttons plus gutters), and room
+    // below the last row. Keep the separate accessory row unchanged.
+    static let minimumHeight: CGFloat = 4 * 44 + 20
     weak var terminalView: TerminalView?
     let small = ["1234567890",
                  "[]{}<>&ihp",
@@ -59,6 +62,15 @@ class KeyboardView: UIView {
     @objc func backslash (_ sender: AnyObject) { clickAndSend([UInt8 (ascii: "\\")]) }
     @objc func deleteKey (_ sender: AnyObject) { clickAndSend(EscapeSequences.cmdDelKey) }
 
+    // Explicit chords, not a sticky Shift modifier. Do not route these through
+    // insertText: IME/text insertion must not turn an escape sequence into text.
+    @objc func shiftLeft (_ sender: AnyObject) { clickAndSend(EscapeSequences.moveLeftShift) }
+    @objc func shiftRight (_ sender: AnyObject) { clickAndSend(EscapeSequences.moveRightShift) }
+    @objc func shiftUp (_ sender: AnyObject) { clickAndSend(EscapeSequences.moveUpShift) }
+    @objc func shiftDown (_ sender: AnyObject) { clickAndSend(EscapeSequences.moveDownShift) }
+    @objc func shiftTab (_ sender: AnyObject) { clickAndSend(EscapeSequences.cmdBackTab) }
+    @objc func shiftEnter (_ sender: AnyObject) { clickAndSend(EscapeSequences.cmdShiftRet) }
+
     var views: [UIView] = []
     
     func buildUI () {
@@ -69,22 +81,28 @@ class KeyboardView: UIView {
         for x in views {
             x.removeFromSuperview()
         }
+        views.removeAll(keepingCapacity: true)
         let source = small
         let bottomPad = 20.0
-        let slotWidth = frame.width/10
-        let slotHeight = (frame.height-bottomPad)/Double (source.count)
+        let slotWidth = bounds.width/10
+        let slotHeight = (bounds.height-bottomPad)/Double (source.count + 1)
         let xpadding = min(slotWidth * 0.1, 4.0)
         let ypadding = min(slotHeight * 0.1, 4.0)
         var x = 0.0
         var y = ypadding
         
-        func makeButton (_ txt: String, _ sel: Selector, img: String? = nil, isNormal: Bool = true) {
-            let rect = CGRect(x: x, y: y, width: slotWidth-(xpadding*2), height: slotHeight-(ypadding*2))
-            x += slotWidth
+        func makeButton (_ txt: String, _ sel: Selector, img: String? = nil, isNormal: Bool = true,
+                         width: CGFloat? = nil, accessibilityLabel: String? = nil) {
+            let keyWidth = width ?? slotWidth
+            let rect = CGRect(x: x, y: y, width: keyWidth-(xpadding*2), height: slotHeight-(ypadding*2))
+            x += keyWidth
             let b = UIButton.init(type: .roundedRect)
             TerminalAccessory.styleButton(b)
             b.addTarget(self, action: sel, for: .touchDown)
             b.frame = rect
+            if let accessibilityLabel {
+                b.accessibilityLabel = accessibilityLabel
+            }
             if let icon = img {
                 if let img = UIImage (systemName: icon, withConfiguration: UIImage.SymbolConfiguration (pointSize: 14.0)) {
                     b.setImage(img.withTintColor(terminalView.buttonColor, renderingMode: .alwaysOriginal), for: .normal)
@@ -100,6 +118,16 @@ class KeyboardView: UIView {
             addSubview(b)
         }
         
+        x = xpadding
+        let chordWidth = bounds.width / 6
+        makeButton("⇧←", #selector(shiftLeft), isNormal: false, width: chordWidth, accessibilityLabel: "Shift Left Arrow")
+        makeButton("⇧→", #selector(shiftRight), isNormal: false, width: chordWidth, accessibilityLabel: "Shift Right Arrow")
+        makeButton("⇧↑", #selector(shiftUp), isNormal: false, width: chordWidth, accessibilityLabel: "Shift Up Arrow")
+        makeButton("⇧↓", #selector(shiftDown), isNormal: false, width: chordWidth, accessibilityLabel: "Shift Down Arrow")
+        makeButton("⇧Tab", #selector(shiftTab), isNormal: false, width: chordWidth, accessibilityLabel: "Shift Tab")
+        makeButton("⇧Enter", #selector(shiftEnter), isNormal: false, width: chordWidth, accessibilityLabel: "Shift Enter")
+        y += slotHeight
+
         for row in source {
             x = xpadding
             for key in row {
