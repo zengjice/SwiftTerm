@@ -1328,6 +1328,27 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             interpretKeyEvents([event])
             return
         }
+
+        // AppKit turns Shift+arrows into move*AndModifySelection: commands,
+        // which have no terminal equivalent in doCommand(by:). Use the existing
+        // encoder's legacy CSI form so the application receives the modifiers.
+        // Leave Command shortcuts, Option-as-compose and unshifted word motion
+        // on their existing paths, and let an active IME consume its own arrows.
+        if eventFlags.contains(.shift),
+           !eventFlags.contains(.command),
+           !eventFlags.contains(.option) || optionAsMetaKey,
+           let key = kittyFunctionalKey(from: event),
+           key == .left || key == .right || key == .up || key == .down {
+            if kittyIsComposing {
+                interpretKeyEvents([event])
+                return
+            }
+            let modifiers = kittyModifiers(from: event, includeOption: optionAsMetaKey)
+                .intersection([.shift, .alt, .ctrl]) // Legacy CSI does not report lock state.
+            if sendKittyFunctionalKey(key, modifiers: modifiers) {
+                return
+            }
+        }
         
         // Handle Option-letter to send the ESC sequence plus the letter as expected by terminals
         if eventFlags.contains ([.option, .command]) {
