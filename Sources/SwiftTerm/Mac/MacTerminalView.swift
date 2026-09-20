@@ -291,6 +291,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     public var terminal: Terminal!
 
     /// Marked (uncommitted) text from an input source (IME, dictation, etc.).
+    /// The single source of truth for composition in both legacy and Kitty input.
     private var markedTextStorage: NSAttributedString?
     private var markedSelectedRange: NSRange = NSRange(location: NSNotFound, length: 0)
     private var markedTextOverlay: NSTextField?
@@ -1227,7 +1228,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             turnOffUrlPreview ()
         }
         if terminal.keyboardEnhancementFlags.contains(.reportAllKeys),
-           !kittyIsComposing,
+           !hasMarkedText(),
            let modifierKey = kittyModifierKey(from: event.keyCode),
            let modifierFlag = modifierFlag(for: modifierKey) {
             let isDown = event.modifierFlags.contains(modifierFlag)
@@ -1243,7 +1244,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                                            text: nil,
                                            shiftedKey: nil,
                                            baseLayoutKey: nil,
-                                           composing: kittyIsComposing)
+                                           composing: hasMarkedText())
             _ = sendKittyEvent(kittyEvent)
         }
         super.flagsChanged(with: event)
@@ -1275,7 +1276,6 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
 
     private var pendingKittyKeyEvent: PendingKittyKeyEvent?
-    private var kittyIsComposing = false
     
     //
     // We capture a handful of keydown events and pre-process those, and then let
@@ -1311,7 +1311,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                                                text: kittyTextForFunctionalKey(functionKey, event: event),
                                                shiftedKey: nil,
                                                baseLayoutKey: nil,
-                                               composing: kittyIsComposing)
+                                               composing: hasMarkedText())
                 if sendKittyEvent(kittyEvent) {
                     return
                 }
@@ -1339,7 +1339,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
            !eventFlags.contains(.option) || optionAsMetaKey,
            let key = kittyFunctionalKey(from: event),
            key == .left || key == .right || key == .up || key == .down {
-            if kittyIsComposing {
+            if hasMarkedText() {
                 interpretKeyEvents([event])
                 return
             }
@@ -1599,7 +1599,6 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                 }
                 let pendingEvent = pendingKittyKeyEvent
                 pendingKittyKeyEvent = nil
-                kittyIsComposing = false
                 let text = str as String
 
                 // Option acting as a compose/AltGr layer (e.g. on the Czech
@@ -1670,7 +1669,6 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             markedTextStorage = nil
         }
         markedSelectedRange = selectedRange
-        kittyIsComposing = true
         updateMarkedTextOverlay()
     }
 
@@ -2041,7 +2039,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                              text: text,
                              shiftedKey: shiftedScalar,
                              baseLayoutKey: baseLayoutKey,
-                             composing: kittyIsComposing)
+                             composing: hasMarkedText())
     }
 
     private func kittyKeyEvent(from event: NSEvent, eventType: KittyKeyboardEventType, text: String? = nil) -> KittyKeyEvent? {
@@ -2053,7 +2051,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                                  text: text,
                                  shiftedKey: nil,
                                  baseLayoutKey: nil,
-                                 composing: kittyIsComposing)
+                                 composing: hasMarkedText())
         }
         return kittyTextEvent(from: event, eventType: eventType, text: text)
     }
@@ -2065,7 +2063,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                              text: text,
                              shiftedKey: nil,
                              baseLayoutKey: nil,
-                             composing: kittyIsComposing)
+                             composing: hasMarkedText())
     }
 
     @discardableResult
@@ -2083,7 +2081,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
                                   text: nil,
                                   shiftedKey: nil,
                                   baseLayoutKey: nil,
-                                  composing: kittyIsComposing)
+                                  composing: hasMarkedText())
         return sendKittyEvent(event)
     }
     
@@ -2091,7 +2089,6 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     open func unmarkText() {
         markedTextStorage = nil
         markedSelectedRange = NSRange(location: NSNotFound, length: 0)
-        kittyIsComposing = false
         updateMarkedTextOverlay()
     }
     

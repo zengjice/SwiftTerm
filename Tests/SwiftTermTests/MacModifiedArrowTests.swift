@@ -71,6 +71,60 @@ struct MacModifiedArrowTests {
         #expect(capture.sent.isEmpty)
     }
 
+    enum CompositionEnd: CaseIterable {
+        case commit, emptyCommit, clearPlain, clearAttributed, unmark, bracketedPaste
+    }
+
+    @Test("Finished IME composition cannot keep modified arrows in AppKit",
+          arguments: CompositionEnd.allCases, [false, true])
+    func shiftedArrowsAfterComposition(end: CompositionEnd, kitty: Bool) throws {
+        let view = InputView(frame: CGRect(x: 0, y: 0, width: 640, height: 320))
+        let capture = Capture()
+        view.terminalDelegate = capture
+        if kitty { view.feed(text: "\u{1b}[>3u") }
+        let replacement = NSRange(location: NSNotFound, length: 0)
+        view.setMarkedText("zhong", selectedRange: NSRange(location: 5, length: 0),
+                           replacementRange: replacement)
+        #expect(view.hasMarkedText())
+
+        switch end {
+        case .commit:
+            view.insertText("中", replacementRange: replacement)
+            #expect(capture.sent == Array("中".utf8))
+        case .emptyCommit:
+            view.insertText("", replacementRange: replacement)
+        case .clearPlain:
+            view.setMarkedText("", selectedRange: NSRange(location: 0, length: 0),
+                               replacementRange: replacement)
+        case .clearAttributed:
+            view.setMarkedText(NSAttributedString(string: ""), selectedRange: NSRange(location: 0, length: 0),
+                               replacementRange: replacement)
+        case .unmark:
+            view.unmarkText()
+        case .bracketedPaste:
+            view.feed(text: "\u{1b}[?2004h")
+            view.insertText("中", replacementRange: replacement, isPaste: true)
+            #expect(capture.sent == Array("\u{1b}[200~中\u{1b}[201~".utf8))
+        }
+
+        #expect(!view.hasMarkedText())
+        capture.sent = []
+        for direction in ["A", "B", "C", "D"] {
+            view.keyDown(with: try arrow(direction, flags: .shift))
+        }
+        #expect(capture.sent == Array("\u{1b}[1;2A\u{1b}[1;2B\u{1b}[1;2C\u{1b}[1;2D".utf8))
+        #expect(view.interpretedEvents.isEmpty)
+
+        // Starting another composition must still reserve arrows for the IME.
+        capture.sent = []
+        view.setMarkedText("wen", selectedRange: NSRange(location: 3, length: 0),
+                           replacementRange: replacement)
+        view.keyDown(with: try arrow("D", flags: .shift))
+        #expect(view.hasMarkedText())
+        #expect(view.interpretedEvents.count == 1)
+        #expect(capture.sent.isEmpty)
+    }
+
     @Test
     func plainCommandAndComposePathsRemainAppKitOwned() throws {
         let view = InputView(frame: .zero)
