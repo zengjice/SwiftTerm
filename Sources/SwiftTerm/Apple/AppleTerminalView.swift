@@ -435,6 +435,11 @@ extension TerminalView {
     public func synchronizedOutputChanged (source: Terminal, active: Bool)
     {
         if !active {
+            // Commit the completed frame's dirty range before native painting.
+            // Re-arming the layer AND queuing updateDisplay left that same range
+            // pending, so the 60 Hz timer painted the frame a second time.
+            // This also commits the final cursor state with the completed frame.
+            updateDisplay()
             // A native display request deferred by TerminalDisplayLayer may
             // have consumed its invalidation. Re-arm it even without new bytes
             // (timeout/reset) or a previous backing store (first frame).
@@ -444,7 +449,6 @@ extension TerminalView {
             layer.setNeedsDisplay()
             #endif
             updateScroller()
-            queuePendingDisplay()
             terminalDelegate?.scrolled(source: self, position: scrollPosition)
         }
     }
@@ -1372,9 +1376,8 @@ extension TerminalView {
         let visibleStart = displayBuffer.yDisp
         let visibleEnd = min(displayBuffer.lines.count - 1,
                              visibleStart + max(0, displayBuffer.rows - 1))
-        coreGraphicsLineRenderCache.retainRows(
-            in: visibleStart <= visibleEnd ? visibleStart...visibleEnd : nil
-        )
+        coreGraphicsLineRenderCache.retainLines(visibleStart <= visibleEnd
+            ? (visibleStart...visibleEnd).map { displayBuffer.lines[$0] } : [])
 
         // Clear the invalidated region before painting. We fill only cells that carry
         // an explicit background; default-background cells rely on transparent backing-
@@ -1473,7 +1476,8 @@ extension TerminalView {
                     coreGraphicsLineRenderCache.insert(renderState,
                                                        forRow: row,
                                                        line: line,
-                                                       cols: displayBuffer.cols)
+                                                       cols: displayBuffer.cols,
+                                                       reusableAcrossRows: lineInfo.kittyPlaceholders.isEmpty)
                 }
             }
             let lineInfo = renderState.lineInfo
@@ -2041,7 +2045,8 @@ extension TerminalView {
     // The code below is intended to not repaint too often, which can produce flicker, for example
     // when the user refreshes the display, and this repains the screen, as dispatch delivers data
     // in blocks of 1024 bytes, which is not enough to cover the whole screen, so this delays
-    // the update for a 1/600th of a second.
+    // the update for roughly 1/60th of a second. Completed DEC 2026 frames
+    // commit directly; a later timer must find their dirty range already consumed.
     //
     // It is also cheap, so should be called when new data has been posted or received.
     func queuePendingDisplay ()

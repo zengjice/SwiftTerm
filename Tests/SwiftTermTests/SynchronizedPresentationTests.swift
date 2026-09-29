@@ -73,6 +73,24 @@ struct SynchronizedPresentationTests {
         #expect(layer.contents != nil)
     }
 
+    @Test func syncEndConsumesDirtyRangeBeforeNativePresentation() throws {
+        let view = makeView()
+        view.feed(text: "\(esc)[?2026h\(esc)[HCOMPLETE\(esc)[?2026l")
+        // Native painting and the delayed feed scheduler must not independently
+        // commit the same dirty range. This contract is shared by Mac and iOS.
+        #expect(view.terminal.getUpdateRange() == nil)
+        #expect(view.caretView?.isHidden == true)
+    }
+
+    @Test func bytesAfterSyncEndStillGetPresented() async throws {
+        let view = makeView()
+        view.feed(text: "\(esc)[?2026h\(esc)[HCOMPLETE\(esc)[?2026l\(esc)[HTRAILING")
+        #expect(view.terminal.getUpdateRange() != nil)
+        try await Task.sleep(for: .milliseconds(60))
+        #expect(view.terminal.getUpdateRange() == nil)
+        #expect(view.terminal.getLine(row: 0)?.translateToString(trimRight: true).hasPrefix("TRAILING") == true)
+    }
+
     @Test func cursorRemainsAttachedAndCommitsOnlyFinalVisibilityAndPosition() throws {
         let view = makeView()
         view.feed(text: "\(esc)[?25h")

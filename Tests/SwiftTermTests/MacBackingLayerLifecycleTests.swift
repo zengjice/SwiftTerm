@@ -139,6 +139,27 @@ struct MacBackingLayerLifecycleTests {
     }
 
     @Test
+    func synchronizedFramesPaintOnceIncludingReturnToLatest() async throws {
+        let view = makeView()
+        view.feed(text: "\(esc)[?1049h\(esc)[?25l\(esc)[HSTART")
+        let window = makeWindow(view)
+        defer { close(window) }
+        window.orderBack(nil)
+        try await pump(for: 0.1)
+        let band = view.terminal.rows - 2
+        // Both directions, then the final frame at the live edge. No forced draw.
+        for index in 0..<12 {
+            let previousDraws = view.drawCount
+            let scroll = index < 6 ? "3T" : "3S"
+            let label = index == 11 ? "LATEST" : "FRAME \(index)"
+            view.feed(text: "\(esc)[?2026h\(esc)[1;\(band)r\(esc)[\(scroll)\(esc)[H\(label)\(esc)[r\(esc)[?2026l")
+            try await pump(for: 0.06)
+            #expect(view.drawCount == previousDraws + 1)
+            #expect(view.lastPaintedLine.hasPrefix(label))
+        }
+    }
+
+    @Test
     func firstSynchronizedFrameAppearsAtSyncEndWithoutMoreText() async throws {
         let view = makeView()
         let window = makeWindow(view)
