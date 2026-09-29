@@ -386,6 +386,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
           
     func setup()
     {
+        (layer as? TerminalDisplayLayer)?.terminalView = self
         showsHorizontalScrollIndicator = true
         indicatorStyle = .white
         
@@ -398,6 +399,8 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
         setupAccessoryView ()
         didFinishSetup = true
     }
+
+    public override class var layerClass: AnyClass { TerminalDisplayLayer.self }
 
 #if canImport(MetalKit)
     /// Enables or disables GPU-accelerated rendering via Metal.
@@ -474,7 +477,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
             metalView = nil
             metalRenderer = nil
             if let caretView = caretView {
-                caretView.isHidden = false
+                updateCursorVisibility()
                 caretView.updateCursorStyle()
             }
             setNeedsDisplay(bounds)
@@ -1862,6 +1865,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     override public func draw (_ dirtyRect: CGRect) {
+        guard !terminal.synchronizedOutputActive else { return }
 #if canImport(MetalKit)
         if useMetalRenderer {
             return
@@ -3096,17 +3100,19 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     open func showCursor(source: Terminal) {
-        guard let caretView else { return }
-        if caretView.superview == nil {
-            addSubview(caretView)
-        }
+        guard !source.synchronizedOutputActive else { return }
+        updateCursorVisibility()
+        if isUsingMetalRenderer { queueMetalDisplay() }
     }
 
     open func hideCursor(source: Terminal) {
-        caretView?.removeFromSuperview()
+        guard !source.synchronizedOutputActive else { return }
+        updateCursorVisibility()
+        if isUsingMetalRenderer { queueMetalDisplay() }
     }
     
     open func cursorStyleChanged (source: Terminal, newStyle: CursorStyle) {
+        guard !source.synchronizedOutputActive else { return }
         caretView?.style = newStyle
         updateCaretView()
     }

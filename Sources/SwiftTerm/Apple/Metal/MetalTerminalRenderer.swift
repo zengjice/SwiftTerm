@@ -311,6 +311,10 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
+        // MTKView/blink/layout callbacks bypass TerminalView.updateDisplay.
+        // Do not acquire or present a drawable containing an incomplete frame;
+        // CAMetalLayer keeps the last presented drawable until sync-end redraw.
+        guard let terminalView, !terminalView.terminal.synchronizedOutputActive else { return }
 #if canImport(os)
         let drawID = OSSignpostID(log: MetalTerminalRenderer.profileLog)
         if MetalTerminalRenderer.profileEnabled {
@@ -324,10 +328,6 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
 #endif
         if frameSemaphore.wait(timeout: .now()) != .success {
             markPendingRedraw()
-            return
-        }
-        guard let terminalView = terminalView else {
-            frameSemaphore.signal()
             return
         }
 #if os(macOS)
@@ -2972,13 +2972,17 @@ final class MetalTerminalRenderer: NSObject, MTKViewDelegate {
         // missing bundle falls through to the next candidate instead of
         // aborting the process.
         let bundleName = "SwiftTerm_SwiftTerm.bundle"
-        if let url = Bundle.main.resourceURL?.appendingPathComponent(bundleName),
-           let resourceBundle = Bundle(url: url) {
-            bundles.append(resourceBundle)
-        }
-        if let url = Bundle.main.bundleURL.appendingPathComponent(bundleName) as URL?,
-           let resourceBundle = Bundle(url: url) {
-            bundles.append(resourceBundle)
+        let codeBundle = Bundle(for: MetalTerminalRenderer.self)
+        // XCTest's main bundle is the runner, not the package's code bundle.
+        // Swift Build nests resources in the xctest bundle; native SwiftPM
+        // puts the resource bundle next to it in the products directory.
+        for container in [Bundle.main, codeBundle] {
+            for root in [container.resourceURL, container.bundleURL,
+                         container.bundleURL.deletingLastPathComponent()].compactMap({ $0 }) {
+                if let resourceBundle = Bundle(url: root.appendingPathComponent(bundleName)) {
+                    bundles.append(resourceBundle)
+                }
+            }
         }
         #endif
         bundles.append(Bundle(for: MetalTerminalRenderer.self))

@@ -435,6 +435,14 @@ extension TerminalView {
     public func synchronizedOutputChanged (source: Terminal, active: Bool)
     {
         if !active {
+            // A native display request deferred by TerminalDisplayLayer may
+            // have consumed its invalidation. Re-arm it even without new bytes
+            // (timeout/reset) or a previous backing store (first frame).
+            #if os(macOS)
+            layer?.setNeedsDisplay()
+            #else
+            layer.setNeedsDisplay()
+            #endif
             updateScroller()
             queuePendingDisplay()
             terminalDelegate?.scrolled(source: self, position: scrollPosition)
@@ -1323,6 +1331,7 @@ extension TerminalView {
     // TODO: this should not render any lines outside the dirtyRect
     func drawTerminalContents (dirtyRect: TTRect, context: CGContext, bufferOffset: Int)
     {
+        guard !terminal.synchronizedOutputActive else { return }
         let lineDescent = CTFontGetDescent(fontSet.normal)
         let lineLeading = CTFontGetLeading(fontSet.normal)
         let yOffset = ceil(lineDescent+lineLeading)
@@ -1975,22 +1984,34 @@ extension TerminalView {
         }
     }
     
-    func updateCursorPosition()
+    /// Keep the caret in the hierarchy: remove/add invalidates constraints and
+    /// the SwiftUI platform-view host on every TUI hide/show pair. Cursor state,
+    /// like text, is committed only after a synchronized frame is complete.
+    func updateCursorVisibility()
     {
-        guard let caretView else { return }
-        //let lineOrigin = CGPoint(x: 0, y: frame.height - (cellDimension.height * (CGFloat(terminal.buffer.y - terminal.buffer.yDisp + 1))))
-        //caretView.frame.origin = CGPoint(x: lineOrigin.x + (cellDimension.width * CGFloat(terminal.buffer.x)), y: lineOrigin.y)
+        guard !terminal.synchronizedOutputActive, let caretView else { return }
         let buffer = terminal.displayBuffer
         let vy = buffer.yBase + buffer.y
-        
-        if vy >= buffer.yDisp + buffer.rows {
-            caretView.removeFromSuperview()
-            return
-        } else if terminal.cursorHidden == false && caretView.superview != self {
-            addSubview(caretView)
-        } else if terminal.cursorHidden == true && caretView.superview == self {
-            caretView.removeFromSuperview()
+        var hidden = terminal.cursorHidden || vy < buffer.yDisp || vy >= buffer.yDisp + buffer.rows
+        #if canImport(MetalKit)
+        hidden = hidden || metalView != nil
+        #endif
+        if caretView.isHidden != hidden {
+            caretView.isHidden = hidden
         }
+    }
+
+    func updateCursorPosition()
+    {
+        guard !terminal.synchronizedOutputActive, let caretView else { return }
+        updateCursorVisibility()
+        if caretView.style != terminal.options.cursorStyle {
+            caretView.style = terminal.options.cursorStyle
+        }
+        let buffer = terminal.displayBuffer
+        let vy = buffer.yBase + buffer.y
+        guard vy >= 0, vy < buffer.lines.count,
+              vy >= buffer.yDisp, vy < buffer.yDisp + buffer.rows else { return }
         let doublePosition = buffer.lines [vy].renderMode == .single ? 1.0 : 2.0
         #if os(iOS) || os(visionOS)
         let offset = (cellDimension.height * (CGFloat(buffer.y+(buffer.yBase))))

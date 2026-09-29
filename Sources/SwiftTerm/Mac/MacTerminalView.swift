@@ -374,6 +374,12 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         setupFocusNotification()
     }
 
+    open override func makeBackingLayer() -> CALayer {
+        let layer = TerminalDisplayLayer()
+        layer.terminalView = self
+        return layer
+    }
+
 #if canImport(MetalKit)
     /// Enables or disables GPU-accelerated rendering via Metal.
     ///
@@ -432,7 +438,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
             metalRenderer = nil
             metalBoundWindow = nil
             if let caretView = caretView {
-                caretView.isHidden = false
+                updateCursorVisibility()
                 caretView.updateCursorStyle()
             }
             needsDisplay = true
@@ -560,7 +566,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         metalBoundWindow = nil
         useMetalRenderer = false
         if let caretView = caretView {
-            caretView.isHidden = false
+            updateCursorVisibility()
             caretView.updateCursorStyle()
         }
         needsDisplay = true
@@ -970,6 +976,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     override public func draw (_ dirtyRect: NSRect) {
+        guard !terminal.synchronizedOutputActive else { return }
 #if canImport(MetalKit)
         if metalView != nil {
             return
@@ -2911,24 +2918,25 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     }
     
     open func showCursor(source: Terminal) {
+        guard !source.synchronizedOutputActive else { return }
         if useMetalRenderer {
             queueMetalDisplay()
             return
         }
-        if caretView.superview == nil {
-            addSubview(caretView)
-        }
+        updateCursorVisibility()
     }
 
     open func hideCursor(source: Terminal) {
+        guard !source.synchronizedOutputActive else { return }
         if useMetalRenderer {
             queueMetalDisplay()
             return
         }
-        caretView.removeFromSuperview()
+        updateCursorVisibility()
     }
     
     open func cursorStyleChanged (source: Terminal, newStyle: CursorStyle) {
+        guard !source.synchronizedOutputActive else { return }
         caretView.style = newStyle
         updateCaretView()
         if useMetalRenderer {
