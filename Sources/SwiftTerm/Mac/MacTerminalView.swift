@@ -361,6 +361,10 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     private func setup()
     {
         wantsLayer = true
+        // TerminalDisplayLayer is not AppKit's default backing-layer class.
+        // Opt into native view invalidation explicitly; the default resize
+        // policy otherwise consumes needsDisplay without painting this layer.
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
         isBigSur = ProcessInfo.processInfo.isOperatingSystemAtLeast(OperatingSystemVersion(majorVersion: 11, minorVersion: 0, patchVersion: 0))
         if isBigSur {
             disableFullRedrawOnAnyChanges = true
@@ -377,6 +381,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     open override func makeBackingLayer() -> CALayer {
         let layer = TerminalDisplayLayer()
         layer.terminalView = self
+        layer.contentsScale = backingScaleFactor()
         return layer
     }
 
@@ -575,6 +580,7 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
 
     open override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        synchronizeBackingLayerScale()
         startWindowMouseMovedFallback()
 #if canImport(MetalKit)
         guard useMetalRenderer, let currentWindow = window else { return }
@@ -583,7 +589,23 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
         }
 #endif
     }
-    
+
+    open override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        synchronizeBackingLayerScale()
+    }
+
+    private func synchronizeBackingLayerScale() {
+        guard let window, let layer else { return }
+        let scale = window.backingScaleFactor
+        guard layer.contentsScale != scale else { return }
+        // Custom backing layers start at 1x and do not inherit AppKit's native
+        // backing-layer scale management. Re-rasterize when attaching/moving
+        // between screens, without resizing the terminal grid or resetting it.
+        layer.contentsScale = scale
+        needsDisplay = true
+    }
+
     func startDisplayUpdates ()
     {
         // Not used on Mac
