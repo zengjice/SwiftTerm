@@ -205,6 +205,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     /// Controls link highlighting and link activation behavior.
     public var linkHighlightMode: LinkHighlightMode = .hover {
         didSet {
+            coreGraphicsLineRenderCache.removeAll()
             linkHighlightRange = nil
             terminal.updateFullScreen()
             queuePendingDisplay()
@@ -285,6 +286,7 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     
     var selection: SelectionService!
     var attrStrBuffer: CircularList<ViewLineInfo>!
+    var coreGraphicsLineRenderCache = CoreGraphicsLineRenderCache<CoreGraphicsLineRenderState>()
     var images:[(image: TerminalImage, col: Int, row: Int)] = []
 
     // Attribute dictionary, maps a console attribute (color, flags) to the corresponding dictionary
@@ -1490,11 +1492,16 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     }
     
     /// Controls weather to use high ansi colors, if false terminal will use bold text instead of high ansi colors
-    public var useBrightColors: Bool = true
+    public var useBrightColors: Bool = true {
+        didSet {
+            colorsChanged()
+        }
+    }
 
     /// When true, block element (U+2580-U+259F) and box drawing (U+2500-U+257F) characters use custom rendering.
     public var customBlockGlyphs: Bool = true {
         didSet {
+            coreGraphicsLineRenderCache.removeAll()
             terminal.updateFullScreen()
             queuePendingDisplay()
         }
