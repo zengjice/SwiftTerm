@@ -261,7 +261,6 @@ public final class Buffer {
         }
     }
     
-    private var curAttr: Attribute = Attribute.empty
     private var insertMode: Bool = false
     private var marginMode: Bool = false
     private var wraparound: Bool = false
@@ -1152,6 +1151,17 @@ public final class Buffer {
     // that we fetched, and the column.
     var lastBufferStorage: (y: Int, x: Int, cols: Int, rows: Int) = (0, 0, 0, 0)
 
+    /// A write intersecting half of a wide character must clear its other half.
+    /// Only the two boundaries need checking, including for a bulk ASCII write.
+    private func clearPartialWideCharacters(in row: BufferLine, start: Int, end: Int, attribute: Attribute) {
+        if start > 0 && row[start].width == 0 && row[start - 1].width == 2 {
+            row[start - 1] = CharData(attribute: attribute)
+        }
+        if end < row.count && row[end - 1].width == 2 {
+            row[end] = CharData(attribute: attribute)
+        }
+    }
+
     /// Bulk-inserts ASCII characters (all width-1, non-combining).
     /// Returns number of bytes consumed. Returns 0 if insert mode is active.
     func insertAsciiRun(_ bytes: ArraySlice<UInt8>, attribute: Attribute) -> Int {
@@ -1174,6 +1184,7 @@ public final class Buffer {
             let available = right - _x + 1
             let runLen = min(available, bytes.endIndex - idx)
             let row = _lines[_y + _yBase]
+            clearPartialWideCharacters(in: row, start: _x, end: _x + runLen, attribute: attribute)
             for i in 0..<runLen {
                 row[_x + i] = CharData(attribute: attribute, code: Int32(bytes[idx + i]), size: 1)
             }
@@ -1225,16 +1236,20 @@ public final class Buffer {
 
         // insert mode: move characters to right
         if insertMode {
-            var empty = CharData.Null
-            empty.attribute = curAttr
+            let empty = CharData(attribute: charData.attribute)
+            // Inserting between the halves would shift an orphan continuation.
+            if _x > 0 && bufferRow[_x].width == 0 && bufferRow[_x - 1].width == 2 {
+                bufferRow[_x - 1] = empty
+                bufferRow[_x] = empty
+            }
             // right shift cells according to the width
             bufferRow.insertCells (pos: _x, n: chWidth, rightMargin: marginMode ? _marginRight : _cols-1, fillData: empty)
             // test last cell - since the last cell has only room for
             // a halfwidth char any fullwidth shifted there is lost
             // and will be set to eraseChar
-            let lastCell = bufferRow [_cols - 1]
+            let lastCell = bufferRow [right]
             if lastCell.width == 2 {
-                bufferRow [_cols - 1] = empty
+                bufferRow [right] = empty
             }
         }
 
@@ -1243,6 +1258,7 @@ public final class Buffer {
         if _x >= _cols {
             _x = _cols-1
         }
+        clearPartialWideCharacters(in: bufferRow, start: _x, end: min(_x + chWidth, _cols), attribute: charData.attribute)
         bufferRow[_x] = charData
         _x += 1
 
@@ -1250,7 +1266,7 @@ public final class Buffer {
         // for graphemes bigger than fullwidth we can simply loop to zero
         // we already made sure above, that buffer.x + chWidth will not overflow right
         if chWidth > 1 {
-            let wideEmpty = CharData(attribute: curAttr, scalar: UnicodeScalar(0)!, size: 0)
+            let wideEmpty = CharData(attribute: charData.attribute, code: 0, size: 0)
             chWidth -= 1
             while chWidth != 0 && _x < _cols {
                 bufferRow [_x] = wideEmpty

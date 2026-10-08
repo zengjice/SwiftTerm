@@ -154,6 +154,22 @@ struct CoreGraphicsRenderingCacheTests {
         try expectFreshPixels(pixels, view: view)
     }
 
+    @Test(arguments: ["", "\u{1b}[44m", "\u{1b}[7m"])
+    func partialWideCharacterUpdatesMatchAFullRepaint(sgr: String) throws {
+        let incremental = makeView(alternate: true)
+        let reference = makeView(alternate: true)
+        let prefix = "\(esc)[1;1H\(esc)[2K" + sgr
+        incremental.feed(text: prefix + "中文 😀 | TABLE\(esc)[0m")
+        _ = try paint(incremental)
+        let neighbor = try cachedLine(incremental, row: 1)
+        incremental.feed(text: "\(esc)[1;1H\(sgr) \(esc)[1;3H \(esc)[1;6H \(esc)[0m")
+        reference.feed(text: prefix + "        | TABLE\(esc)[0m")
+        let pixels = try paint(incremental)
+        #expect(pixels == (try paint(reference)))
+        #expect(try cachedLine(incremental, row: 1) === neighbor)
+        try expectFreshPixels(pixels, view: incremental)
+    }
+
     #if os(iOS) || os(visionOS)
     @Test func fractionalHistoryViewportReusesOnlyVisibleLines() throws {
         let view = makeView()
