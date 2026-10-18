@@ -326,12 +326,12 @@ extension TerminalView {
         return GlyphSlotFit(dx: dx, dy: dy, scale: scale)
     }
 
-    func mapColor (color: Attribute.Color, isFg: Bool, isBold: Bool, useBrightColors: Bool = true) -> TTColor
+    func mapColor (color: Attribute.Color, isFg: Bool, isBold: Bool, useBrightColors: Bool = true, inverse: Bool = false) -> TTColor
     {
         let resolved = resolveColor(color: color, isFg: isFg, isBold: isBold, useBrightColors: useBrightColors)
         switch color {
         case .ansi256, .trueColor:
-            return explicitColorTransform?(resolved, isFg) ?? resolved
+            return explicitColorTransform?(resolved, isFg, inverse) ?? resolved
         case .defaultColor, .defaultInvertedColor:
             return resolved
         }
@@ -523,7 +523,7 @@ extension TerminalView {
         ]
         if flags.contains (.underline) {
             let underlineColor = attribute.underlineColor.map {
-                mapColor(color: $0, isFg: true, isBold: flags.contains(.bold), useBrightColors: useBrightColors)
+                mapColor(color: $0, isFg: true, isBold: flags.contains(.bold), useBrightColors: useBrightColors, inverse: flags.contains(.inverse))
             } ?? fg
             let underlineVariant = attribute.underlineStyle == .none ? .single : attribute.underlineStyle
             nsattr [.underlineColor] = underlineColor
@@ -581,8 +581,8 @@ extension TerminalView {
             tf = fontSet.normal
         }
         
-        var fgColor = mapColor (color: fg, isFg: true, isBold: isBold, useBrightColors: useBrightColors)
-        let bgColor = mapColor (color: bg, isFg: false, isBold: false)
+        var fgColor = mapColor (color: fg, isFg: true, isBold: isBold, useBrightColors: useBrightColors, inverse: flags.contains(.inverse))
+        let bgColor = mapColor (color: bg, isFg: false, isBold: false, inverse: flags.contains(.inverse))
         // Apply dim/faint attribute (SGR 2)
         if flags.contains (.dim) {
             fgColor = fgColor.dimmedColor (towards: bgColor)
@@ -594,7 +594,7 @@ extension TerminalView {
         ]
         if flags.contains (.underline) {
             let underlineColor = attribute.underlineColor.map {
-                mapColor(color: $0, isFg: true, isBold: isBold, useBrightColors: useBrightColors)
+                mapColor(color: $0, isFg: true, isBold: isBold, useBrightColors: useBrightColors, inverse: flags.contains(.inverse))
             } ?? fgColor
             let underlineVariant = attribute.underlineStyle == .none ? .single : attribute.underlineStyle
             nsattr [.underlineColor] = underlineColor

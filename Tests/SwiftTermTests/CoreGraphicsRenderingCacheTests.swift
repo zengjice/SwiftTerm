@@ -73,7 +73,7 @@ struct CoreGraphicsRenderingCacheTests {
         view.feed(text: "\(esc)[1;1H\(esc)[38;2;180;220;180m\(esc)[48;2;57;57;57mRGB\(esc)[0m\(esc)[31mANSI\(esc)[0m")
         let attribute = view.terminal.buffer.lines[0][0].attribute
         let first = try paint(view)
-        view.explicitColorTransform = { _, foreground in foreground ? .black : .white }
+        view.explicitColorTransform = { _, foreground, _ in foreground ? .black : .white }
         let adapted = try paint(view)
         #expect(adapted != first)
         #expect(view.terminal.buffer.lines[0][0].attribute == attribute)
@@ -82,6 +82,33 @@ struct CoreGraphicsRenderingCacheTests {
         try expectFreshPixels(adapted, view: view)
         view.explicitColorTransform = nil
         #expect(try paint(view) == first)
+    }
+
+    @Test(arguments: ["7", "31;7", "1;31;7", "2;31;7", "38;2;213;53;56;7",
+                      "48;2;57;57;57;7", "38;2;242;242;242;48;2;57;57;57;7;4;58;2;213;53;56"])
+    func transformCanPreserveInverseColorPairs(sgr: String) throws {
+        let view = makeView()
+        view.nativeForegroundColor = TTColor.make(red: 13.0 / 255, green: 13.0 / 255, blue: 13.0 / 255, alpha: 1)
+        view.nativeBackgroundColor = .white
+        view.feed(text: "\(esc)[1;1H\(esc)[\(sgr)mInverse\(esc)[0m")
+        let attribute = view.terminal.buffer.lines[0][0].attribute
+        let original = try #require(view.getAttributes(attribute, withUrl: false))
+        let pixels = try paint(view)
+        view.explicitColorTransform = { color, foreground, inverse in
+            inverse ? color : (foreground ? .black : .white)
+        }
+        let adapted = try #require(view.getAttributes(attribute, withUrl: false))
+        for key in [NSAttributedString.Key.foregroundColor, .backgroundColor, .underlineColor] {
+            #expect(adapted[key] as? TTColor == original[key] as? TTColor)
+        }
+        #expect(try paint(view) == pixels)
+        #expect(view.terminal.buffer.lines[0][0].attribute == attribute)
+        // Caret rendering resolves its own colors but must carry inverse state
+        // when resolving an explicit underline color too.
+        let caret = try #require(view.getAttributedValue(attribute, usingFg: .black, andBg: .white))
+        view.explicitColorTransform = nil
+        let originalCaret = try #require(view.getAttributedValue(attribute, usingFg: .black, andBg: .white))
+        #expect(caret[.underlineColor] as? TTColor == originalCaret[.underlineColor] as? TTColor)
     }
 
     @Test func changedRowRebuildsWithoutDiscardingItsNeighbor() throws {

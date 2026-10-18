@@ -300,9 +300,10 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     var colors: [UIColor?] = Array(repeating: nil, count: 256)
     var trueColors: [Attribute.Color:UIColor] = [:]
     /// Optional display-only mapping of explicit ANSI/RGB colors. The Boolean
-    /// is true for foreground colors. Default colors and buffer attributes are
-    /// unchanged. Replacing the mapping invalidates cached text and rendering.
-    public var explicitColorTransform: ((UIColor, Bool) -> UIColor)? {
+    /// arguments indicate foreground and inverse video, respectively. Colors
+    /// are already resolved/swapped; defaults and buffer attributes are unchanged.
+    /// Replacing the mapping invalidates cached text and rendering.
+    public var explicitColorTransform: ((UIColor, Bool, Bool) -> UIColor)? {
         didSet { colorsChanged() }
     }
     var transparent = TTColor.transparent ()
