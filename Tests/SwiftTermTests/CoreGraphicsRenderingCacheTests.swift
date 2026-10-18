@@ -68,6 +68,22 @@ struct CoreGraphicsRenderingCacheTests {
         try expectFreshPixels(first, view: view)
     }
 
+    @Test func explicitColorTransformInvalidatesRenderingWithoutChangingBuffer() throws {
+        let view = makeView()
+        view.feed(text: "\(esc)[1;1H\(esc)[38;2;180;220;180m\(esc)[48;2;57;57;57mRGB\(esc)[0m\(esc)[31mANSI\(esc)[0m")
+        let attribute = view.terminal.buffer.lines[0][0].attribute
+        let first = try paint(view)
+        view.explicitColorTransform = { _, foreground in foreground ? .black : .white }
+        let adapted = try paint(view)
+        #expect(adapted != first)
+        #expect(view.terminal.buffer.lines[0][0].attribute == attribute)
+        #expect(view.mapColor(color: .defaultColor, isFg: true, isBold: false) == view.nativeForegroundColor)
+        #expect(view.mapColor(color: .ansi256(code: 1), isFg: true, isBold: false) == .black)
+        try expectFreshPixels(adapted, view: view)
+        view.explicitColorTransform = nil
+        #expect(try paint(view) == first)
+    }
+
     @Test func changedRowRebuildsWithoutDiscardingItsNeighbor() throws {
         let view = makeView()
         let before = try paint(view)

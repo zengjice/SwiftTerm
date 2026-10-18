@@ -328,6 +328,17 @@ extension TerminalView {
 
     func mapColor (color: Attribute.Color, isFg: Bool, isBold: Bool, useBrightColors: Bool = true) -> TTColor
     {
+        let resolved = resolveColor(color: color, isFg: isFg, isBold: isBold, useBrightColors: useBrightColors)
+        switch color {
+        case .ansi256, .trueColor:
+            return explicitColorTransform?(resolved, isFg) ?? resolved
+        case .defaultColor, .defaultInvertedColor:
+            return resolved
+        }
+    }
+
+    private func resolveColor (color: Attribute.Color, isFg: Bool, isBold: Bool, useBrightColors: Bool) -> TTColor
+    {
         switch color {
         case .defaultColor:
             if isFg {

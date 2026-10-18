@@ -311,6 +311,12 @@ open class TerminalView: NSView, NSTextInputClient, NSUserInterfaceValidations, 
     // Cache for the colors in the 0..255 range
     var colors: [NSColor?] = Array(repeating: nil, count: 256)
     var trueColors: [Attribute.Color:NSColor] = [:]
+    /// Optional display-only mapping of explicit ANSI/RGB colors. The Boolean
+    /// is true for foreground colors. Default colors and buffer attributes are
+    /// unchanged. Replacing the mapping invalidates cached text and rendering.
+    public var explicitColorTransform: ((NSColor, Bool) -> NSColor)? {
+        didSet { colorsChanged() }
+    }
     var transparent = TTColor.transparent ()
     var isBigSur = true
     

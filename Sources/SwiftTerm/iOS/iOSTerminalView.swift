@@ -299,6 +299,12 @@ open class TerminalView: UIScrollView, UITextInputTraits, UIKeyInput, UIScrollVi
     // Cache for the colors in the 0..255 range
     var colors: [UIColor?] = Array(repeating: nil, count: 256)
     var trueColors: [Attribute.Color:UIColor] = [:]
+    /// Optional display-only mapping of explicit ANSI/RGB colors. The Boolean
+    /// is true for foreground colors. Default colors and buffer attributes are
+    /// unchanged. Replacing the mapping invalidates cached text and rendering.
+    public var explicitColorTransform: ((UIColor, Bool) -> UIColor)? {
+        didSet { colorsChanged() }
+    }
     var transparent = TTColor.transparent ()
     private var lastLayoutBounds: CGRect = .zero
     
