@@ -12,6 +12,8 @@ struct IOSAccessoryLayoutTests {
         let accessory = try #require(terminal.inputAccessoryView as? TerminalAccessory)
         accessory.setupUI()
 
+        #expect(accessory.configuration.showsTouchToggle)
+        #expect(hasButton(#selector(TerminalAccessory.toggleTouch(_:)), in: accessory))
         #expect(accessory.configuration.showsEscapeKey)
         #expect(hasButton(#selector(TerminalAccessory.esc(_:)), in: accessory))
         #expect(hasButton(#selector(TerminalAccessory.left(_:)), in: accessory))
@@ -52,6 +54,34 @@ struct IOSAccessoryLayoutTests {
             }
         }
         #expect(abs((accessory.views.last?.frame.maxX ?? 0) - (width - 2)) < 0.001)
+    }
+
+    @Test("Hiding the touch toggle preserves mouse mode and redistributes the keys",
+          arguments: [320.0, 375.0, 420.0, 852.0, 1024.0], [false, true])
+    func hiddenTouchToggle(width: Double, mouseReporting: Bool) throws {
+        let terminal = TerminalView(frame: CGRect(x: 0, y: 0, width: 420, height: 300))
+        terminal.allowMouseReporting = mouseReporting
+        let accessory = try #require(terminal.inputAccessoryView as? TerminalAccessory)
+        accessory.configuration = .init(showsHorizontalArrows: false,
+                                        showsFunctionKeys: false, buttonHeight: 32,
+                                        showsEscapeKey: false, showsTouchToggle: false)
+        accessory.bounds.size.width = width
+        accessory.layoutSubviews()
+
+        #expect(accessory.views.count == 9)
+        #expect(!hasButton(#selector(TerminalAccessory.toggleTouch(_:)), in: accessory))
+        #expect(terminal.allowMouseReporting == mouseReporting)
+        let expectedWidth = (width - 4 - 8 * 4) / 9
+        for view in accessory.views {
+            #expect(abs(view.frame.width - expectedWidth) < 0.001)
+            #expect(accessory.bounds.contains(view.frame))
+        }
+        #expect(abs((accessory.views.last?.frame.maxX ?? 0) - (width - 2)) < 0.001)
+
+        accessory.configuration.showsTouchToggle = true
+        #expect(hasButton(#selector(TerminalAccessory.toggleTouch(_:)), in: accessory))
+        #expect(accessory.touchButton.isSelected == !mouseReporting)
+        #expect(terminal.allowMouseReporting == mouseReporting)
     }
 
     @Test("Resetting configuration restores the original accessory height")

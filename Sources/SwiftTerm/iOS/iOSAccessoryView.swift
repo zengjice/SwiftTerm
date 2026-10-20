@@ -25,13 +25,16 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         public var showsFunctionKeys: Bool
         public var buttonHeight: CGFloat?
         public var showsEscapeKey: Bool
+        public var showsTouchToggle: Bool
 
         public init(showsHorizontalArrows: Bool = true, showsFunctionKeys: Bool = true,
-                    buttonHeight: CGFloat? = nil, showsEscapeKey: Bool = true) {
+                    buttonHeight: CGFloat? = nil, showsEscapeKey: Bool = true,
+                    showsTouchToggle: Bool = true) {
             self.showsHorizontalArrows = showsHorizontalArrows
             self.showsFunctionKeys = showsFunctionKeys
             self.buttonHeight = buttonHeight
             self.showsEscapeKey = showsEscapeKey
+            self.showsTouchToggle = showsTouchToggle
         }
     }
 
@@ -249,9 +252,12 @@ public class TerminalAccessory: UIInputView, UIInputViewAudioFeedback {
         if configuration.showsHorizontalArrows {
             rightViews.append(makeAutoRepeatButton ("arrow.right", #selector(right)))
         }
-        touchButton = makeButton ("", #selector(toggleTouch), icon: "hand.draw", isNormal: false)
-        touchButton.isSelected = !(terminalView?.allowMouseReporting ?? false)
-        rightViews.append (touchButton)
+        touchButton = nil
+        if configuration.showsTouchToggle {
+            touchButton = makeButton ("", #selector(toggleTouch), icon: "hand.draw", isNormal: false)
+            touchButton.isSelected = !(terminalView?.allowMouseReporting ?? false)
+            rightViews.append (touchButton)
+        }
         keyboardButton = makeButton ("", #selector(toggleInputKeyboard), icon: "keyboard.chevron.compact.down", isNormal: false)
         rightViews.append (keyboardButton)
 
